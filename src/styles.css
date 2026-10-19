@@ -1,0 +1,69 @@
+:root {
+  color: #1c2430;
+  background: #f4f1ea;
+  font-family: "Segoe UI", sans-serif;
+  font-size: 16px;
+}
+
+* { box-sizing: border-box; }
+
+body { margin: 0; }
+
+button, input, textarea, select { font: inherit; }
+
+button {
+  background: #1f4b3a;
+  color: white;
+  border: 0;
+  border-radius: 8px;
+  padding: 0.65rem 1rem;
+  cursor: pointer;
+}
+
+button.secondary { background: #e7e1d6; color: #1c2430; }
+
+button:disabled { opacity: 0.55; cursor: not-allowed; }
+
+main { max-width: 1100px; margin: 0 auto; padding: 1.25rem; }
+
+header p { margin-top: 0.25rem; color: #4d5968; }
+
+section {
+  background: white;
+  border-radius: 12px;
+  padding: 1rem 1.1rem;
+  margin-bottom: 0.9rem;
+}
+
+label { display: block; margin: 0.45rem 0; }
+
+textarea, input[type="text"], input[type="number"] {
+  width: 100%;
+  padding: 0.5rem;
+  border: 1px solid #d5d0c6;
+  border-radius: 8px;
+}
+
+.row { display: flex; gap: 0.6rem; flex-wrap: wrap; align-items: center; }
+
+.progress {
+  height: 10px;
+  background: #e7e1d6;
+  border-radius: 99px;
+  overflow: hidden;
+  margin: 0.6rem 0;
+}
+
+.progress span { display: block; height: 100%; background: #1f4b3a; }
+
+table { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
+
+th, td { text-align: left; padding: 0.4rem; border-bottom: 1px solid #eee; vertical-align: top; }
+
+.table-wrap { overflow-x: auto; }
+
+.muted { color: #4d5968; }
+
+.error { color: #8a2b2b; }
+
+.weights { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.5rem; }

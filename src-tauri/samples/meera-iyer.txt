@@ -1,0 +1,7 @@
+Meera Iyer
+meera.iyer@example.com
+Location: Bengaluru
+Company: Wipro
+6 years experience
+Notice period: 2 months
+Skills: Java, Spring Boot

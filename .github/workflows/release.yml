@@ -1,0 +1,39 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    permissions:
+      contents: write
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install frontend dependencies
+        run: npm install
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: Talent Scout Desktop ${{ github.ref_name }}
+          releaseBody: |
+            Windows 10 or 11. One setup file. No other programs to install.
+
+            1. Download the setup file below (the name ends in setup.exe).
+            2. Open it. If Windows says it protected your PC, choose More info, then Run anyway. This appears because the file is not from a paid certificate.
+            3. Finish the setup. It does not need an administrator password.
+            4. Open Talent Scout Desktop from the Start menu.
+            5. Choose a folder of resumes, paste the job description, click Rank profiles, then Download Excel.
+
+            To remove the app, use Settings, Apps. The uninstaller asks whether to delete the saved scores.
+          releaseDraft: false
+          prerelease: false
+          args: --bundles nsis
