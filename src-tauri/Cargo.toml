@@ -27,6 +27,8 @@ regex = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 rust_xlsxwriter = "0.79"
 hex = "0.4"
+aes-gcm = "0.10"
+keyring = "3"
 
 [features]
 default = ["custom-protocol"]

@@ -98,6 +98,7 @@ impl Control {
 enum Item {
     File(PathBuf),
     Memory { path: String, filename: String, bytes: Vec<u8> },
+    Failed { path: String, filename: String, message: String },
 }
 
 struct Ready {
@@ -225,6 +226,7 @@ pub fn ingest_path(
                         notice_raw: ready.notice_raw,
                         notice_days: ready.notice_days,
                         error: ready.error,
+                        note: String::new(),
                         score: None,
                         matching: String::new(),
                         missing: String::new(),
@@ -251,6 +253,17 @@ pub fn ingest_path(
             );
         }
     });
+    {
+        let connection = conn.lock().unwrap();
+        let _ = db::mark_duplicate_emails(&connection, &root_text);
+        let _ = db::set_setting(&connection, "saved_at", &chrono::Utc::now().timestamp().to_string());
+        let done = progress.lock().unwrap().clone();
+        let _ = db::audit(
+            &connection,
+            "folder read",
+            &format!("new={} unchanged={} could_not_read={}", done.parsed, done.skipped, done.errors),
+        );
+    }
     let mut current = progress.lock().unwrap().clone();
     current.state = if control.cancelled() { "cancelled".into() } else { "done".into() };
     current.done = current.total;
@@ -264,30 +277,42 @@ fn publish(progress: &Mutex<Progress>, on_update: &impl Fn(&Progress), next: Pro
 }
 
 fn should_skip(conn: &Mutex<Connection>, item: &Item) -> Result<bool, String> {
-    let Item::File(path) = item else {
-        return Ok(false);
-    };
-    let meta = match fs::metadata(path) {
-        Ok(meta) => meta,
-        Err(_) => return Ok(false),
-    };
-    let size = meta.len() as i64;
-    let mtime = mtime_of(&meta);
-    let connection = conn.lock().unwrap();
-    let Some((cached_size, cached_mtime, cached_hash, error)) = db::cached(&connection, &path.to_string_lossy()) else {
-        return Ok(false);
-    };
-    if error.is_empty() && cached_size == size && cached_mtime == mtime {
-        return Ok(true);
-    }
-    if error.is_empty() {
-        let bytes = fs::read(path).map_err(|err| err.to_string())?;
-        if hash_bytes(&bytes) == cached_hash {
-            db::touch_cache(&connection, &path.to_string_lossy(), size, mtime)?;
-            return Ok(true);
+    match item {
+        Item::Failed { .. } => Ok(false),
+        Item::File(path) => {
+            let meta = match fs::metadata(path) {
+                Ok(meta) => meta,
+                Err(_) => return Ok(false),
+            };
+            if meta.len() > 15 * 1024 * 1024 {
+                return Ok(false);
+            }
+            let size = meta.len() as i64;
+            let mtime = mtime_of(&meta);
+            let connection = conn.lock().unwrap();
+            let Some((cached_size, cached_mtime, cached_hash, error)) = db::cached(&connection, &path.to_string_lossy()) else {
+                return Ok(false);
+            };
+            if error.is_empty() && cached_size == size && cached_mtime == mtime {
+                return Ok(true);
+            }
+            if error.is_empty() {
+                let bytes = fs::read(path).map_err(|_| "This file could not be opened. Close it in another program and read the folder again.".to_string())?;
+                if hash_bytes(&bytes) == cached_hash {
+                    db::touch_cache(&connection, &path.to_string_lossy(), size, mtime)?;
+                    return Ok(true);
+                }
+            }
+            Ok(false)
+        }
+        Item::Memory { path, bytes, .. } => {
+            let connection = conn.lock().unwrap();
+            let Some((_, _, cached_hash, error)) = db::cached(&connection, path) else {
+                return Ok(false);
+            };
+            Ok(error.is_empty() && hash_bytes(bytes) == cached_hash)
         }
     }
-    Ok(false)
 }
 
 fn collect(root: &Path) -> Result<Vec<Item>, String> {
@@ -334,22 +359,32 @@ fn zip_items(path: &Path) -> Vec<Item> {
         if name.contains("..") || !allowed_name(&name) || name.to_lowercase().ends_with(".zip") {
             continue;
         }
+        let filename = Path::new(&name)
+            .file_name()
+            .and_then(|item| item.to_str())
+            .unwrap_or("resume")
+            .to_string();
         if entry.size() > 8 * 1024 * 1024 {
+            items.push(Item::Failed {
+                path: format!("{}!/{}", path.display(), name),
+                filename,
+                message: "This file inside the zip is too large to read. Split it or send a smaller copy.".into(),
+            });
             continue;
         }
         total += entry.size();
         if total > 80 * 1024 * 1024 {
+            items.push(Item::Failed {
+                path: format!("{}!/{}", path.display(), name),
+                filename,
+                message: "The zip is too large to finish. Split it into smaller zip files.".into(),
+            });
             break;
         }
         let mut bytes = Vec::new();
         if entry.read_to_end(&mut bytes).is_err() {
             continue;
         }
-        let filename = Path::new(&name)
-            .file_name()
-            .and_then(|item| item.to_str())
-            .unwrap_or("resume")
-            .to_string();
         items.push(Item::Memory {
             path: format!("{}!/{}", path.display(), name),
             filename,
@@ -361,11 +396,25 @@ fn zip_items(path: &Path) -> Vec<Item> {
 
 fn parse_item(item: &Item) -> Ready {
     match item {
+        Item::Failed { path, filename, message } => {
+            ready(path.clone(), filename.clone(), 0, 0, String::new(), crate::fields::Profile::blank(), message)
+        }
         Item::File(path) => {
             let filename = file_label(path);
             let meta = fs::metadata(path).ok();
             let size = meta.as_ref().map(|item| item.len() as i64).unwrap_or(0);
             let mtime = meta.as_ref().map(mtime_of).unwrap_or(0);
+            if size > 15 * 1024 * 1024 {
+                return ready(
+                    path.to_string_lossy().to_string(),
+                    filename,
+                    size,
+                    mtime,
+                    String::new(),
+                    crate::fields::Profile::blank(),
+                    "This file is too large to read. Split it or send a smaller copy.",
+                );
+            }
             let bytes = fs::read(path).unwrap_or_default();
             let hash = hash_bytes(&bytes);
             match profile_from_path(path) {
@@ -386,7 +435,7 @@ fn parse_item(item: &Item) -> Ready {
 fn cancelled_item(item: &Item) -> Ready {
     let (path, filename) = match item {
         Item::File(path) => (path.to_string_lossy().to_string(), file_label(path)),
-        Item::Memory { path, filename, .. } => (path.clone(), filename.clone()),
+        Item::Memory { path, filename, .. } | Item::Failed { path, filename, .. } => (path.clone(), filename.clone()),
     };
     ready(path, filename, 0, 0, String::new(), crate::fields::Profile::blank(), "cancelled")
 }

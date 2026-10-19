@@ -1,0 +1,7 @@
+[
+  {"id": "p1", "name": "Ananya Rao", "email": "ananya.rao@example.com", "phone": "+919876543210", "location": "Bengaluru", "skills": "java, spring boot, kafka", "company": "Infosys", "years": 8, "notice": "30 days"},
+  {"id": "p2", "name": "Meera Iyer", "email": "meera.iyer@example.com", "phone": "", "location": "Bengaluru", "skills": "java, spring boot", "company": "Wipro", "years": 6, "notice": "60 days"},
+  {"id": "p3", "name": "Rahul Menon", "email": "rahul.menon@example.com", "phone": "+919876543211", "location": "Pune", "skills": "python, django", "company": "Tcs", "years": 4, "notice": "0 days"},
+  {"id": "p4", "name": "Kavya Nair", "email": "kavya.nair@example.com", "phone": "+919812345678", "location": "Hyderabad", "skills": "java, kubernetes", "company": "Hcl", "years": 7, "notice": "15 days"},
+  {"id": "p5", "name": "Arjun Shah", "email": "arjun.shah@example.com", "phone": "+919800112233", "location": "Mumbai", "skills": "react, node, sql", "company": "Accenture", "years": 5, "notice": "Serving notice"}
+]

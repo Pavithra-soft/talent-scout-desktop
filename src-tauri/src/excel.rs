@@ -18,12 +18,13 @@ pub fn write_xlsx(path: &Path, rows: &[Stored]) -> Result<(), String> {
         "Email",
         "Phone",
         "Location",
-        "Skill Set",
-        "Matching Skills",
-        "Non-Matching Skills",
-        "Previous Company",
-        "Notice Period",
-        "Score",
+        "Skills",
+        "Matching skills",
+        "Missing skills",
+        "Company",
+        "Notice",
+        "Match score",
+        "Note",
     ];
     for (col, title) in titles.iter().enumerate() {
         sheet
@@ -45,6 +46,7 @@ pub fn write_xlsx(path: &Path, rows: &[Stored]) -> Result<(), String> {
             row.company.clone(),
             row.notice_raw.clone(),
             row.score.map(|score| score.to_string()).unwrap_or_default(),
+            row.note.clone(),
         ];
         for (col, value) in values.iter().enumerate() {
             sheet
@@ -53,7 +55,7 @@ pub fn write_xlsx(path: &Path, rows: &[Stored]) -> Result<(), String> {
         }
     }
     let last = rows.len() as u32;
-    sheet.autofilter(0, 0, last, 10).map_err(|err| err.to_string())?;
+    sheet.autofilter(0, 0, last, 11).map_err(|err| err.to_string())?;
     sheet.set_freeze_panes(1, 0).map_err(|err| err.to_string())?;
     workbook.save(path).map_err(|err| err.to_string())?;
     Ok(())
