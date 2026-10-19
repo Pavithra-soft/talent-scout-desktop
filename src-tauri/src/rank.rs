@@ -90,25 +90,48 @@ pub fn score_profile(
             missing.push(skill.clone());
         }
     }
-    let must_ratio = ratio(matched_must.len(), job.must_have.len());
-    let nice_ratio = ratio(matched_nice.len(), job.nice_to_have.len());
+    let listed_skills = !job.must_have.is_empty() || !job.nice_to_have.is_empty();
+    let listed_experience = job.min_years.is_some() || job.max_years.is_some();
+    let listed_location = !job.locations.is_empty();
+    if !listed_skills && !listed_experience && !listed_location {
+        return Score {
+            score: 0,
+            matching: Vec::new(),
+            missing: Vec::new(),
+            rationale: "This job did not list skills, experience, or a city, so no score was given. Add those details and rank again.".to_string(),
+        };
+    }
+    let must_ratio = if job.must_have.is_empty() { 0.0 } else { ratio(matched_must.len(), job.must_have.len()) };
+    let nice_ratio = if job.nice_to_have.is_empty() { 0.0 } else { ratio(matched_nice.len(), job.nice_to_have.len()) };
     let experience_ratio = experience_fit(years, job.min_years, job.max_years);
     let location_ratio = location_fit(location, &job.locations);
-    let total = (weights.must + weights.nice + weights.experience + weights.location).max(1) as f32;
-    let points = weights.must as f32 * must_ratio
-        + weights.nice as f32 * nice_ratio
-        + weights.experience as f32 * experience_ratio
-        + weights.location as f32 * location_ratio;
+    let weight_must = if job.must_have.is_empty() { 0 } else { weights.must };
+    let weight_nice = if job.nice_to_have.is_empty() { 0 } else { weights.nice };
+    let weight_experience = if listed_experience { weights.experience } else { 0 };
+    let weight_location = if listed_location { weights.location } else { 0 };
+    let total = (weight_must + weight_nice + weight_experience + weight_location).max(1) as f32;
+    let points = weight_must as f32 * must_ratio
+        + weight_nice as f32 * nice_ratio
+        + weight_experience as f32 * experience_ratio
+        + weight_location as f32 * location_ratio;
     let score = ((100.0 * points / total).round() as i32).clamp(0, 100);
     let mut matching = matched_must.clone();
     matching.extend(matched_nice.iter().cloned());
-    let rationale = format!(
-        "Matches {} of {} must-have skills. {} {}",
-        matched_must.len(),
-        job.must_have.len(),
-        experience_line(experience_ratio, years),
-        location_line(location_ratio, location)
-    );
+    let rationale = if !listed_skills {
+        format!(
+            "This job did not list skills, so skills were not scored. {} {}",
+            experience_line(experience_ratio, years),
+            location_line(location_ratio, location)
+        )
+    } else {
+        format!(
+            "Matches {} of {} required skills. {} {}",
+            matched_must.len(),
+            job.must_have.len(),
+            experience_line(experience_ratio, years),
+            location_line(location_ratio, location)
+        )
+    };
     Score {
         score,
         matching,
@@ -220,5 +243,17 @@ mod tests {
         assert!(strong.score > weak.score);
         assert!(weak.missing.iter().any(|skill| skill == "kafka"));
         assert!(!strong.rationale.is_empty());
+    }
+
+    #[test]
+    fn a_job_without_skills_does_not_award_skill_points() {
+        let empty = parse_job("Hiring now");
+        let blank = score_profile("", None, "", &empty, &Weights::default());
+        assert_eq!(blank.score, 0);
+        assert!(blank.rationale.contains("did not list skills"));
+        let city_only = parse_job("Need someone in Bengaluru soon");
+        let elsewhere = score_profile("Python", None, "Pune", &city_only, &Weights::default());
+        assert_eq!(elsewhere.score, 0);
+        assert!(elsewhere.rationale.contains("skills were not scored"));
     }
 }

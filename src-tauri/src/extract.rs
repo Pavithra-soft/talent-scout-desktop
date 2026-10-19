@@ -14,11 +14,18 @@ pub fn profile_from_path(path: &Path) -> Result<Profile, String> {
 }
 
 pub fn profile_from_bytes(name: &str, bytes: &[u8]) -> Result<Profile, String> {
+    if bytes.len() > 15 * 1024 * 1024 {
+        return Err("This file is too large to read. Split it or send a smaller copy.".to_string());
+    }
     let text = text_from_bytes(name, bytes)?;
     if text.trim().is_empty() {
-        return Err("No text found in this file.".to_string());
+        return Err("This file is empty. Remove it or add a resume with text.".to_string());
     }
-    Ok(profile_from_text(&text))
+    let profile = profile_from_text(&text);
+    if name.to_lowercase().ends_with(".doc") && profile.name.is_empty() && profile.email.is_empty() {
+        return Err("This older Word file could not be read. Save it as .docx and add it again.".to_string());
+    }
+    Ok(profile)
 }
 
 fn text_from_bytes(name: &str, bytes: &[u8]) -> Result<String, String> {
@@ -33,15 +40,16 @@ fn text_from_bytes(name: &str, bytes: &[u8]) -> Result<String, String> {
         return docx_text(bytes);
     }
     if lower.ends_with(".pdf") {
-        return pdf_extract::extract_text_from_mem(bytes).map_err(|err| err.to_string());
+        return pdf_extract::extract_text_from_mem(bytes)
+            .map_err(|_| "This PDF could not be read. Ask for an unlocked copy.".to_string());
     }
     if lower.ends_with(".doc") {
         return Ok(doc_text(bytes));
     }
     if lower.ends_with(".png") || lower.ends_with(".jpg") || lower.ends_with(".jpeg") {
-        return Err("This is a picture without text, so it was skipped.".to_string());
+        return Err("This is a photo, so it was skipped. The other resumes will still be read.".to_string());
     }
-    Err("This file type is not supported.".to_string())
+    Err("This file type cannot be read. Use PDF, Word, or text.".to_string())
 }
 
 fn docx_text(bytes: &[u8]) -> Result<String, String> {
@@ -76,8 +84,16 @@ fn strip_rtf(value: &str) -> String {
     let mut chars = value.chars().peekable();
     while let Some(ch) = chars.next() {
         if ch == '\\' {
-            if matches!(chars.peek(), Some('u')) {
-                let _ = chars.next();
+            let mut word = String::new();
+            while let Some(next) = chars.peek() {
+                if next.is_ascii_alphabetic() {
+                    word.push(*next);
+                    chars.next();
+                } else {
+                    break;
+                }
+            }
+            if word == "u" {
                 let mut number = String::new();
                 while let Some(digit) = chars.peek() {
                     if digit.is_ascii_digit() || *digit == '-' {
@@ -92,14 +108,8 @@ fn strip_rtf(value: &str) -> String {
                         out.push(decoded);
                     }
                 }
-                continue;
-            }
-            while let Some(next) = chars.peek() {
-                if next.is_ascii_alphabetic() {
-                    chars.next();
-                } else {
-                    break;
-                }
+            } else if word == "par" || word == "line" {
+                out.push('\n');
             }
             if matches!(chars.peek(), Some(' ')) {
                 chars.next();
@@ -169,5 +179,29 @@ mod tests {
         assert_eq!(profile.name, "Ananya Rao");
         assert_eq!(profile.email, "ananya.rao@example.com");
         assert_eq!(profile.location, "Bengaluru");
+    }
+
+    #[test]
+    fn rtf_keeps_email_and_company_on_their_own_lines() {
+        let rtf = "{\\rtf1\\ansi Ananya Rao\\par Email: ananya.rao@example.com\\par Company: Infosys\\par }";
+        let profile = profile_from_bytes("ananya.rtf", rtf.as_bytes()).unwrap();
+        assert_eq!(profile.email, "ananya.rao@example.com");
+        assert_eq!(profile.company, "Infosys");
+        assert_eq!(profile.name, "Ananya Rao");
+    }
+
+    #[test]
+    fn locked_pdf_and_huge_file_use_plain_sentences() {
+        let locked = profile_from_bytes("locked.pdf", b"%PDF-1.4\n1 0 obj<< /Encrypt 2 0 R >>endobj\n%%EOF");
+        assert_eq!(
+            locked.unwrap_err(),
+            "This PDF could not be read. Ask for an unlocked copy."
+        );
+        let huge = vec![b'a'; 15 * 1024 * 1024 + 1];
+        let too_big = profile_from_bytes("huge.txt", &huge);
+        assert_eq!(
+            too_big.unwrap_err(),
+            "This file is too large to read. Split it or send a smaller copy."
+        );
     }
 }

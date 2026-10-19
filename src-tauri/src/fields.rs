@@ -1,3 +1,4 @@
+use chrono::{Datelike, NaiveDate};
 use regex::Regex;
 use std::sync::OnceLock;
 
@@ -31,18 +32,27 @@ impl Profile {
 }
 
 pub fn profile_from_text(text: &str) -> Profile {
+    let text = text.replace('|', ":");
     let mut profile = Profile::blank();
-    profile.email = find_email(text);
-    profile.phone = find_phone(text);
-    profile.location = find_location(text);
-    profile.skills = find_skills(text).join(", ");
-    profile.company = find_company(text);
-    profile.years = find_years(text);
-    let (notice_raw, notice_days) = find_notice(text);
-    profile.notice_raw = notice_raw;
+    profile.email = find_email(&text);
+    profile.phone = find_phone(&text);
+    profile.location = find_location(&text);
+    profile.skills = find_skills(&text).join(", ");
+    profile.company = find_company(&text);
+    profile.years = find_years(&text);
+    let (notice_raw, notice_days) = find_notice(&text);
     profile.notice_days = notice_days;
-    profile.name = find_name(text);
+    profile.notice_raw = notice_label(&notice_raw, notice_days);
+    profile.name = find_name(&text);
     profile
+}
+
+pub fn notice_label(raw: &str, days: Option<i32>) -> String {
+    match days {
+        Some(days) => format!("{days} days"),
+        None if raw.to_lowercase().contains("serving") => "Serving notice".to_string(),
+        None => String::new(),
+    }
 }
 
 pub fn normalize_phone(value: &str) -> String {
@@ -108,9 +118,9 @@ fn find_phone(text: &str) -> String {
 
 fn find_name(text: &str) -> String {
     if let Some(caps) = regex().name_label().captures(text) {
-        let name = caps[1].trim();
-        if looks_like_name(name) {
-            return name.to_string();
+        let name = first_name(&caps[1]);
+        if looks_like_name(&name) {
+            return name;
         }
     }
     for line in text.lines() {
@@ -119,24 +129,83 @@ fn find_name(text: &str) -> String {
             return line.to_string();
         }
     }
-    String::new()
+    leading_name(text)
+}
+
+fn first_name(value: &str) -> String {
+    value
+        .split_whitespace()
+        .take(4)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn leading_name(text: &str) -> String {
+    let mut words = Vec::new();
+    let mut saw_label = false;
+    for word in text.split_whitespace().take(12) {
+        let lower = word.trim_matches(|ch: char| !ch.is_alphanumeric()).to_lowercase();
+        if [
+            "email", "phone", "mobile", "location", "company", "skills", "notice", "experience", "must", "nice", "years", "yrs",
+        ]
+        .iter()
+        .any(|label| lower.starts_with(label))
+        {
+            saw_label = true;
+            break;
+        }
+        let bare: String = word
+            .chars()
+            .filter(|ch| ch.is_alphabetic() || *ch == '.' || *ch == '\'')
+            .collect();
+        if bare.chars().count() < 2 {
+            return String::new();
+        }
+        words.push(bare);
+        if words.len() == 4 {
+            break;
+        }
+    }
+    if !saw_label || !(2..=4).contains(&words.len()) {
+        return String::new();
+    }
+    let name = words.join(" ");
+    if looks_like_name(&name) {
+        name
+    } else {
+        String::new()
+    }
 }
 
 fn looks_like_name(value: &str) -> bool {
     let words: Vec<&str> = value.split_whitespace().collect();
     (2..=4).contains(&words.len())
         && words.iter().all(|word| {
-            word.chars()
-                .all(|ch| ch.is_ascii_alphabetic() || ch == '.' || ch == '\'')
+            word.chars().count() <= 30
+                && word.chars().all(|ch| ch.is_alphabetic() || ch == '.' || ch == '\'')
         })
         && !value.contains('@')
 }
 
 fn find_company(text: &str) -> String {
     if let Some(caps) = regex().company_label().captures(text) {
-        return caps[1].trim().to_string();
+        return trim_company(caps[1].trim());
     }
     String::new()
+}
+
+fn trim_company(value: &str) -> String {
+    let lower = value.to_lowercase();
+    let mut end = value.len();
+    for stop in [" years", " yrs", " notice", " skill", " email", " phone", " location", " experience"] {
+        if let Some(index) = lower.find(stop) {
+            end = end.min(index);
+        }
+    }
+    let cut = value.get(..end).unwrap_or(value).trim();
+    cut.trim_end_matches(|ch: char| ch.is_ascii_digit() || ch.is_whitespace())
+        .trim()
+        .to_string()
 }
 
 fn find_years(text: &str) -> Option<i32> {
@@ -151,16 +220,66 @@ fn find_years(text: &str) -> Option<i32> {
 }
 
 fn find_notice(text: &str) -> (String, Option<i32>) {
+    if let Some(days) = find_lwd_days(text) {
+        return (format!("{days} days"), Some(days));
+    }
     let lower = text.to_lowercase();
     if let Some(index) = lower.find("notice") {
         let slice = &text[index..];
         let end = slice.find('\n').unwrap_or(slice.len().min(80));
-        return normalize_notice(&slice[..end]);
+        let normalized = normalize_notice(&slice[..end]);
+        if normalized.1.is_some() || !normalized.0.is_empty() {
+            return normalized;
+        }
     }
-    if lower.contains("immediate joiner") || lower.contains("immediate") {
+    if lower.contains("immediate") {
         return ("immediate".to_string(), Some(0));
     }
     (String::new(), None)
+}
+
+fn find_lwd_days(text: &str) -> Option<i32> {
+    let lower = text.to_lowercase();
+    if !lower.contains("lwd") && !lower.contains("last working") {
+        return None;
+    }
+    if let Some(caps) = regex().lwd_day_month().captures(text) {
+        let day: u32 = caps[1].parse().ok()?;
+        let month = month_number(&caps[2])?;
+        let year = caps.get(3).and_then(|item| item.as_str().parse().ok());
+        return days_until(day, month, year);
+    }
+    if let Some(caps) = regex().lwd_month_day().captures(text) {
+        let month = month_number(&caps[1])?;
+        let day: u32 = caps[2].parse().ok()?;
+        let year = caps.get(3).and_then(|item| item.as_str().parse().ok());
+        return days_until(day, month, year);
+    }
+    None
+}
+
+fn month_number(value: &str) -> Option<u32> {
+    let value = value.to_lowercase();
+    let months = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+    months.iter().position(|month| value.starts_with(month)).map(|index| index as u32 + 1)
+}
+
+fn days_until(day: u32, month: u32, year: Option<i32>) -> Option<i32> {
+    let today = chrono::Local::now().date_naive();
+    let year = match year {
+        Some(year) => year,
+        None => {
+            let candidate = NaiveDate::from_ymd_opt(today.year(), month, day)?;
+            if candidate < today {
+                today.year() + 1
+            } else {
+                today.year()
+            }
+        }
+    };
+    let lwd = NaiveDate::from_ymd_opt(year, month, day)?;
+    let days = (lwd - today).num_days() as i32;
+    Some(if days < 0 { 0 } else { days })
 }
 
 pub fn find_location(text: &str) -> String {
@@ -253,6 +372,8 @@ struct Patterns {
     name_label: Regex,
     company_label: Regex,
     years: Regex,
+    lwd_day_month: Regex,
+    lwd_month_day: Regex,
 }
 
 impl Patterns {
@@ -271,6 +392,12 @@ impl Patterns {
     fn years(&self) -> &Regex {
         &self.years
     }
+    fn lwd_day_month(&self) -> &Regex {
+        &self.lwd_day_month
+    }
+    fn lwd_month_day(&self) -> &Regex {
+        &self.lwd_month_day
+    }
 }
 
 fn regex() -> &'static Patterns {
@@ -278,12 +405,14 @@ fn regex() -> &'static Patterns {
     PATTERNS.get_or_init(|| Patterns {
         email: Regex::new(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}").unwrap(),
         notice_amount: Regex::new(r"(\d+)\s*(day|days|week|weeks|month|months)").unwrap(),
-        name_label: Regex::new(r"(?i)name\s*[:\-]\s*([A-Za-z][A-Za-z .']{2,60})").unwrap(),
+        name_label: Regex::new(r"(?i)name\s*[:\-]\s*([^\n]{2,80})").unwrap(),
         company_label: Regex::new(
             r"(?i)(?:current company|previous company|company|employer)\s*[:\-]\s*([A-Za-z0-9][A-Za-z0-9 .&-]{1,60})",
         )
         .unwrap(),
         years: Regex::new(r"(?i)(\d{1,2})\s*\+?\s*(?:years|yrs)\b").unwrap(),
+        lwd_day_month: Regex::new(r"(?i)(\d{1,2})\s*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s*(\d{4})?").unwrap(),
+        lwd_month_day: Regex::new(r"(?i)(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:\s*,?\s*(\d{4}))?").unwrap(),
     })
 }
 
@@ -307,6 +436,19 @@ mod tests {
         let (raw, days) = normalize_notice("serving notice");
         assert_eq!(raw, "serving notice");
         assert_eq!(days, None);
+    }
+
+    #[test]
+    fn last_working_day_and_unicode_name() {
+        let profile = profile_from_text("José Alvarez\njose@example.com\nNotice period: LWD 15 Nov\n");
+        assert_eq!(profile.name, "José Alvarez");
+        assert_eq!(profile.notice_days, Some(days_until(15, 11, None).unwrap()));
+        assert!(profile.notice_raw.ends_with(" days"));
+        let table = profile_from_text("Name | Priya Sharma\nEmail | priya.sharma@example.com\nCompany: Infosys 6 years experience Notice period: 30 days\n");
+        assert_eq!(table.name, "Priya Sharma");
+        assert_eq!(table.company, "Infosys");
+        assert_eq!(table.notice_days, Some(30));
+        assert_eq!(table.notice_raw, "30 days");
     }
 
     #[test]
