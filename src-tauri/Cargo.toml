@@ -1,6 +1,6 @@
 [package]
 name = "talent-scout-desktop"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Local recruiter screening. Resumes stay on this computer."
 authors = ["Pavithra-soft"]

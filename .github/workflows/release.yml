@@ -27,13 +27,15 @@ jobs:
           releaseBody: |
             Windows 10 or 11. One setup file. No other programs to install.
 
+            This build includes the screening fixes: notice shown in days, a locked saved search, drafts that are not sent, and a sample portal of practice profiles.
+
             1. Download the setup file below (the name ends in setup.exe).
             2. Open it. If Windows says it protected your PC, choose More info, then Run anyway. This appears because the file is not from a paid certificate.
             3. Finish the setup. It does not need an administrator password.
             4. Open Talent Scout Desktop from the Start menu.
-            5. Choose a folder of resumes, paste the job description, click Rank profiles, then Download Excel.
+            5. Choose a folder of resumes, paste the job, look at the ranked list, then download Excel or save an email draft. Drafts stay on this computer and are not sent.
 
-            To remove the app, use Settings, Apps. The uninstaller asks whether to delete the saved scores.
+            To remove the app, use Settings, Apps. The uninstaller asks whether to delete the saved search. The default is No.
           releaseDraft: false
           prerelease: false
           args: --bundles nsis
