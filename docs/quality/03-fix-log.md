@@ -1,0 +1,44 @@
+# Fix log
+
+Date: 19 October 2026. Suite after fixes: 16 library tests, all passed, about 1.5 seconds. The 206-file probe finished in 278 ms (about 44,000 files/minute) because the 16 MB file is now skipped instead of loaded. The 1,000-text-file test still finishes in under a second. No slowdown against the earlier budget.
+
+| ID | Fix | Commit | Test | Status |
+| --- | --- | --- | --- | --- |
+| D-C1 | Candidate fields are encrypted before they are written. A test reads the database file and does not find `@example.com`. | `8dc47a3` | `saved_email_is_not_plain_text_and_start_fresh_removes_it` | Fixed |
+| D-C2 | An unreadable saved search is replaced and the recruiter is told a new one was started. | `8dc47a3` | `duplicate_emails_are_marked_and_an_old_search_expires` | Fixed |
+| D-H1 | A different folder asks before it clears the current search. Start fresh deletes the saved search. A search older than 7 days is cleared on open. | `8dc47a3` | expiry assertion in the duplicate test; `recruiter_scenarios_s1_to_s6` | Fixed |
+| D-H2 | A job with no skills, experience, or city scores 0. A city-only job does not award skill points. | `735fc1f` | `a_job_without_skills_does_not_award_skill_points` | Fixed |
+| D-H3 | “LWD 15 Nov” becomes a day count. Notice is shown as days in the list and in Excel. | `735fc1f` | `last_working_day_and_unicode_name`; probe notice recall 1.000 | Fixed |
+| D-H4 | A file over 15 MB is skipped with a plain sentence and is not loaded. | `735fc1f` | `locked_pdf_and_huge_file_use_plain_sentences` | Fixed |
+| D-H5 | A failed folder read is reported as one sentence and does not leave the window spinning. | `8dc47a3` | message covered by `recruiter_scenarios_s1_to_s6` for a missing folder | Fixed |
+| D-H6 | Email drafts are saved on this computer and marked unsent. The sample portal copies practice profiles into a chosen folder and never logs into a live job site. | `8dc47a3` | `drafts_are_saved_and_never_marked_sent`; `sample_portal_skips_duplicates_and_logs_counts_only` | Fixed |
+| D-H7 | A bad PDF says to ask for an unlocked copy. Photos and empty files use the same plain style. | `735fc1f` | `locked_pdf_and_huge_file_use_plain_sentences` | Fixed |
+| D-H8 | The window is four steps. Excel headers match the list: Skills, Matching skills, Missing skills, Company, Notice, Match score. | `c38a402` | window build; probe Excel header check | Fixed |
+| D-H9 | RTF line breaks stay as line breaks, so the email and company are not glued together. | `735fc1f` | `rtf_keeps_email_and_company_on_their_own_lines` | Fixed |
+| D-H10 | The company stops at the next label, so later words are not pulled into the company. | `735fc1f` | company assertion in `last_working_day_and_unicode_name` | Fixed |
+| D-M1 | A repeated email is marked “Same email as another candidate in this search”. | `8dc47a3` | `duplicate_emails_are_marked_and_an_old_search_expires` | Fixed |
+| D-M2 | Names with letters outside basic English are kept. | `735fc1f` | `last_working_day_and_unicode_name` | Fixed |
+| D-M3 | A table line such as `Name \| Priya Sharma` is read. | `735fc1f` | same test | Fixed |
+| D-M4 | Unchanged files inside a zip are skipped on the next pass. | `8dc47a3` | probe rescan: parsed 0, skipped 186 | Fixed |
+| D-M5 | An audit line stores the action and a count, not a name or an email. | `8dc47a3` | audit writes covered by start fresh, drafts, and portal tests | Fixed |
+| D-M6 | The job box starts empty. The sample job loads only from “Try the sample resumes”. | `c38a402` | window source | Fixed |
+| D-L1 | The progress bar has a name and a value for keyboard and screen-reader users. | `c38a402` | window source | Fixed |
+| D-M7 | Signed self-update. | — | Installer settings reviewed | Deferred. An unsigned updater would be a worse trust problem. Ship a certificate first. Uninstall still asks before deleting data. |
+| A-M5 | A separate scanner program for photos. | — | Photo message test | Won't fix. Photos stay skipped, with a sentence. Adding a scanner program would be a second install. |
+| A-M9 | Hash every file even when size and time match. | — | 1,000-file skip test | Won't fix. The shortcut is what keeps a second pass fast. Start fresh clears a stale card. |
+
+## Re-measure
+
+| Check | Before | After |
+| --- | --- | --- |
+| Email found as plain text in the saved search | Yes | No |
+| Notice recall on 206 files | 0.838 | 1.000 |
+| Email recall | 0.924 | 1.000 |
+| Company recall | 0.857 | 1.000 |
+| Name recall | 0.859 | 1.000 |
+| Empty job score | 90 | 0 |
+| 206-file read | 4.2 s, including a 16 MB file | 278 ms, 16 MB file skipped |
+| Second pass | 12 zip files read again | 0 files re-read, 186 skipped |
+| Library tests | 6, before the probe | 16 passed |
+
+Name precision on the 206 files is 0.988 (two files with no name line still received a name). That is a low leftover, not an open high defect. Blank is still the rule when the line does not look like a name.

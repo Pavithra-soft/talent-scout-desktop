@@ -1,0 +1,36 @@
+environment=darwin local engine, rust test, synthetic only
+files_labeled=206
+ingest_ok=true
+ingest_err=None
+elapsed_ms=358
+files_per_min=34488.5
+stored_rows=206
+rescan_ms=165
+rescan_skipped=186 parsed=0 errors=20 state=done
+plaintext_email_in_db=false
+zip_escape_saved=false
+error_match=206 error_mismatch=0 missing_rows=0
+name tp=170 fp=2 fn=0 precision=0.988 recall=1.000
+email tp=172 fp=0 fn=0 precision=1.000 recall=1.000
+phone tp=150 fp=0 fn=0 precision=1.000 recall=1.000
+location tp=174 fp=0 fn=0 precision=1.000 recall=1.000
+skills tp=520 fp=0 fn=0 precision=1.000 recall=1.000
+company tp=175 fp=0 fn=0 precision=1.000 recall=1.000
+notice tp=160 fp=0 fn=0 precision=1.000 recall=1.000
+strong_score=90 weak_score=5 stable=true short_job_score=0 empty_job_score=0
+strong_rationale=Matches 3 of 3 required skills. Experience fits. Location matches.
+filter_30=108 city_bengaluru=37 both=23 empty_name=0 jose_rows=1 sort_ok=true
+excel_ok=true excel_rows=108
+excel_strings=<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="1085" uniqueCount="254"><si><t>Rank</t></si><si><t>Name</t></si><si><t>Email</t></si><si><t>Phone</t></si><si><t>Location</t></si><si><t>Skills</t></si><si><t>Matching skills</t></si><si><t>Missing skills</t></si><si><t>Company</t></si><si><t>Notice</t></si><si><t>Match score</t></si><si><t>Note</t></si><si><t>1</t></si><si><t>candidate110@example.com</t></si><si><t>+919876543210</t></si><si><t>Bengaluru</t></si><si><t>spring boot, javascript, java, kafka</t></si><si><t>spring boot, java, kafka, javascript</t></si><si><t>kubernetes</t></si><si><t>Infosys</t></si><si><t>27 days</t></si><si><t>90</t></si><si><t>2</t></si><si><t>Ananya Rao</t></si><si><t>candid
+png_err=Err("This is a photo, so it was skipped. The other resumes will still be read.")
+empty_err=Err("This file is empty. Remove it or add a resume with text.")
+lwd_days=Some(27) expected_lwd=27
+jose_name='José Alvarez'
+saw_running=true
+misses:
+locked=Some(Stored { path: "/var/folders/4j/5qg373b500lbls60_6mlrz2w0000gn/T/scout-round1-49790/bad/locked.pdf", filename: "locked.pdf", size: 48, mtime: 1792383479, content_hash: "8951dc32bffca153ac3200f91904a8cfdcc23aa5934e517a91c02fcfd87b62e8", name: "", email: "", phone: "", location: "", skills: "", company: "", years: None, notice_raw: "", notice_days: None, error: "This PDF could not be read. Ask for an unlocked copy.", note: "", score: None, matching: "", missing: "", rationale: "" })
+huge_error=Some("This file is too large to read. Split it or send a smaller copy.") huge_email=Some("")
+table_name=Some("Priya Sharma") table_email=Some("priya.sharma@example.com")
+cancel_ok=true cancel_state=cancelled cancel_parsed=10 cancel_total=80
+pause_state=done pause_parsed=40 pause_total=40 pause_used=true
