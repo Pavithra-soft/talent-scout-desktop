@@ -10,7 +10,7 @@ The download link is the GitHub Release, not the source code.
 2. Open it. If Windows says it protected your PC, choose **More info**, then **Run anyway**.
 3. Finish the setup. An administrator password is not required.
 4. Open **Talent Scout Desktop** from the Start menu.
-5. Choose the resume folder, paste the job, click **Rank profiles**, then **Download Excel**.
+5. Choose the resume folder, paste the job, look at the ranked candidates, then download Excel or save an email draft.
 
 The setup already includes the Windows piece the window needs (WebView2). There is nothing else to install.
 
@@ -24,7 +24,9 @@ Uninstall from Windows **Settings → Apps**. It asks whether to delete the save
 - Fills name, email, Indian mobile numbers, location, skills, company, experience, and notice period. Unknown fields stay blank.
 - Ranks against a job description with skill synonyms (`JS` = JavaScript, `k8s` = Kubernetes), experience, and location. Weights can be changed.
 - Filters by notice period, location, name, skills, company, and score.
-- Downloads an Excel file of the rows on screen.
+- Downloads an Excel file of the candidates on screen.
+- Saves email drafts on this computer. The app does not send them.
+- Can copy practice profiles from a sample portal into a folder you choose. A live job site is not searched.
 
 Ranking runs on the computer. This version does not send resumes to a cloud model.
 

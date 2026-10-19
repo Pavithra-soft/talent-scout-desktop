@@ -24,6 +24,11 @@ button.secondary { background: #e7e1d6; color: #1c2430; }
 
 button:disabled { opacity: 0.55; cursor: not-allowed; }
 
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible {
+  outline: 3px solid #1f4b3a;
+  outline-offset: 2px;
+}
+
 main { max-width: 1100px; margin: 0 auto; padding: 1.25rem; }
 
 header p { margin-top: 0.25rem; color: #4d5968; }
