@@ -119,6 +119,13 @@ struct Ready {
     error: String,
 }
 
+pub fn require_folder(path: &Path) -> Result<(), String> {
+    if path.as_os_str().is_empty() || !path.exists() {
+        return Err("That folder could not be opened. Choose the folder that holds the resumes.".to_string());
+    }
+    Ok(())
+}
+
 pub fn ingest_path(
     conn: &Mutex<Connection>,
     root: &Path,

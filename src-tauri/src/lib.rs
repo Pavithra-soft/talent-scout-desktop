@@ -11,6 +11,8 @@ mod rank;
 
 #[cfg(test)]
 mod round1_probe;
+#[cfg(test)]
+mod uat_scenarios;
 
 use std::fs;
 use std::path::PathBuf;
@@ -199,7 +201,7 @@ fn sample_jd() -> String {
 fn rank_profiles(state: State<Scout>, jd_text: String, weights: Weights) -> Result<Grid, String> {
     let trimmed = jd_text.trim();
     if trimmed.is_empty() {
-        return Err("Paste a job description first.".to_string());
+        return Err("Paste the job first, then rank the candidates.".to_string());
     }
     let job = rank::parse_job(trimmed);
     let connection = state.db.lock().unwrap();
@@ -242,9 +244,7 @@ fn export_excel(state: State<Scout>, path: String, filters: Filters) -> Result<u
 }
 
 fn start_ingest(app: &AppHandle, state: &Scout, path: PathBuf, replace: bool) -> Result<(), String> {
-    if path.as_os_str().is_empty() || !path.exists() {
-        return Err("That folder could not be opened. Choose the folder that holds the resumes.".to_string());
-    }
+    ingest::require_folder(&path)?;
     if state.running.swap(true, Ordering::SeqCst) {
         return Err("A folder is already being read. Wait for it to finish, or press Cancel.".to_string());
     }

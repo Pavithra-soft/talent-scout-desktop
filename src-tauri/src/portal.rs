@@ -100,7 +100,7 @@ pub fn download(conn: &Connection, folder: &Path, ids: &[String]) -> Result<Down
         saved += 1;
     }
     let log = format!("Saved {saved}. Skipped {skipped} already present. Could not save {failed}.");
-    let _ = fs::write(folder.join("talent-scout-download-log.txt"), &log);
+    let _ = fs::write(folder.join("download-log.log"), &log);
     db::audit(conn, "sample download", &log)?;
     Ok(DownloadResult { saved, skipped, failed })
 }
@@ -135,7 +135,7 @@ mod tests {
         let second = download(&conn, &dir, &["p1".into(), "p1".into()]).unwrap();
         assert_eq!(second.saved, 0);
         assert!(second.skipped >= 1);
-        let log = fs::read_to_string(dir.join("talent-scout-download-log.txt")).unwrap();
+        let log = fs::read_to_string(dir.join("download-log.log")).unwrap();
         assert!(!log.contains("@"));
         let too_many: Vec<String> = (0..21).map(|index| format!("p{index}")).collect();
         assert!(download(&conn, &dir, &too_many).unwrap_err().contains("20"));
