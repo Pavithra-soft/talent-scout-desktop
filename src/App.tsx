@@ -91,11 +91,21 @@ export default function App() {
   const [portalNote, setPortalNote] = useState("");
   const [portalPick, setPortalPick] = useState<string[]>([]);
   const filtersRef = useRef(filters);
+  const jdRef = useRef(jd);
+  const weightsRef = useRef(weights);
+  const resultsRef = useRef<HTMLElement>(null);
   filtersRef.current = filters;
+  jdRef.current = jd;
+  weightsRef.current = weights;
 
   async function refresh(next?: Filters) {
     const result = await invoke<Grid>("list_results", { filters: next ?? filtersRef.current });
     setGrid(result);
+    return result;
+  }
+
+  function showResults() {
+    resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   async function refreshMail() {
@@ -114,7 +124,36 @@ export default function App() {
       setProgress(event.payload);
       if (event.payload.state === "done" || event.payload.state === "cancelled") {
         setBusy(false);
-        refresh().catch((error: Error) => setMessage(plain(error)));
+        refresh()
+          .then(async (loaded) => {
+            if (event.payload.state === "cancelled") {
+              setMessage("Reading stopped. Resumes already read are kept.");
+              showResults();
+              return;
+            }
+            const read = event.payload.parsed + event.payload.skipped;
+            if (read === 0 && event.payload.errors === 0) {
+              setMessage("This folder has no PDF, Word, or text resumes. Choose the folder that contains the files, then click Select Folder. The files do not have to appear in that window.");
+              return;
+            }
+            const job = jdRef.current.trim();
+            const ranked = job
+              ? await invoke<Grid>("rank_profiles", { jdText: job, weights: weightsRef.current })
+              : loaded;
+            if (job) setGrid(ranked);
+            const names = ranked.rows
+              .map((row) => row.name)
+              .filter((name) => name.trim().length > 0)
+              .slice(0, 4);
+            const who = names.length > 0 ? ` ${names.join(", ")}${ranked.rows.length > names.length ? `, and ${ranked.rows.length - names.length} more` : ""}.` : "";
+            setMessage(
+              job
+                ? `Read ${ranked.rows.length} resumes and ranked them for this job.${who}`
+                : `Read ${ranked.rows.length} resumes.${who} Paste the job, then click See ranked candidates.`,
+            );
+            showResults();
+          })
+          .catch((error: Error) => setMessage(plain(error)));
       }
     });
     invoke<string>("startup_note").then((note) => {
@@ -159,6 +198,19 @@ export default function App() {
     if (typeof selectedFolder === "string") {
       await begin(selectedFolder, false);
     }
+  }
+
+  async function chooseFiles() {
+    const picked = await open({
+      directory: false,
+      multiple: true,
+      title: "Choose the resume files",
+      filters: [{ name: "Resumes", extensions: ["pdf", "docx", "doc", "rtf", "txt", "zip"] }],
+    });
+    const paths = Array.isArray(picked) ? picked : typeof picked === "string" ? [picked] : [];
+    if (paths.length === 0) return;
+    const folder = paths[0].replace(/[/\\][^/\\]+$/, "");
+    await begin(folder, false);
   }
 
   async function useSamples() {
@@ -265,9 +317,20 @@ export default function App() {
   }
 
   const percent = progress && progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0;
-  const status = progress
-    ? `${labelState(progress.state)}: ${progress.done} of ${progress.total}. New ${progress.parsed}, unchanged ${progress.skipped}, could not be read ${progress.errors}.`
-    : "Choose a resume folder, or drop one onto this window.";
+  const readCount = progress ? progress.parsed + progress.skipped : 0;
+  const status = !progress
+    ? "Choose the folder that holds the resumes, or choose the files you can see."
+    : progress.state === "done" && readCount === 0 && progress.errors === 0
+      ? "This folder has no PDF, Word, or text resumes."
+      : progress.state === "done"
+        ? `Read ${readCount} resume${readCount === 1 ? "" : "s"}${progress.errors > 0 ? `. ${progress.errors} could not be read` : ""}. They are listed below.`
+        : progress.state === "running"
+          ? `Reading resumes: ${progress.done} of ${progress.total}.`
+          : `${labelState(progress.state)}: ${progress.done} of ${progress.total}.`;
+  const seen = (grid?.rows ?? [])
+    .map((row) => row.name.trim())
+    .filter((name) => name.length > 0)
+    .slice(0, 6);
 
   return (
     <main>
@@ -280,6 +343,7 @@ export default function App() {
         <h2>1. Pick a resume folder</h2>
         <div className="row">
           <button type="button" onClick={chooseFolder} disabled={busy}>Choose resume folder</button>
+          <button type="button" className="secondary" disabled={busy} onClick={chooseFiles}>Choose resume files</button>
           <button type="button" className="secondary" disabled={busy} onClick={useSamples}>Try the sample resumes</button>
           <button type="button" className="secondary" disabled={!busy} onClick={() => invoke("ingest_pause")}>Pause</button>
           <button type="button" className="secondary" disabled={!busy} onClick={() => invoke("ingest_resume")}>Resume</button>
@@ -289,7 +353,12 @@ export default function App() {
         <div className="progress" role="progressbar" aria-label="Folder progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}>
           <span style={{ width: `${percent}%` }} />
         </div>
-        <p className="muted">{status} PDF, Word, and text files are read. A second pass skips files that have not changed.</p>
+        <p className="muted">{status}</p>
+        <p className="muted">In the folder window, the resume files may not be listed. That is normal. Click the folder, then Select Folder. Or click Choose resume files and pick the PDFs and Word files you can see. PDF, Word, and text files are read. Nothing is uploaded.</p>
+        {seen.length > 0 && (
+          <p>Resumes read: {seen.join(", ")}{(grid?.rows.length ?? 0) > seen.length ? `, and ${(grid?.rows.length ?? 0) - seen.length} more` : ""}.</p>
+        )}
+        {message && <p>{message}</p>}
         {progress && progress.messages.length > 0 && (
           <ul className="error">{progress.messages.map((item) => <li key={item}>{item}</li>)}</ul>
         )}
@@ -319,7 +388,7 @@ export default function App() {
         <p className="muted">JS counts as JavaScript. k8s counts as Kubernetes. Blank fields stay blank. Hover a match score to read why.</p>
       </section>
 
-      <section>
+      <section ref={resultsRef}>
         <h2>3. See ranked candidates</h2>
         <div className="row">
           <label>Notice
