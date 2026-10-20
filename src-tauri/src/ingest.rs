@@ -185,7 +185,10 @@ pub fn ingest_path(
             pool.install(|| {
                 todo.par_iter().for_each(|item| {
                     let ready = if worker_control.wait_if_paused() {
-                        parse_item(item)
+                        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| parse_item(item))) {
+                            Ok(ready) => ready,
+                            Err(_) => failed_item(item, "This file could not be read. The other resumes will still be read."),
+                        }
                     } else {
                         cancelled_item(item)
                     };
@@ -204,13 +207,43 @@ pub fn ingest_path(
             if ready.error == "cancelled" {
                 continue;
             }
-            if ready.error.is_empty() {
+            let duplicate = ready.error.is_empty()
+                && !ready.hash.is_empty()
+                && db::hash_saved(&conn.lock().unwrap(), &root_text, &ready.hash);
+            if duplicate {
+                if messages.len() < 40 {
+                    messages.push(format!(
+                        "{}: this is a copy of a resume already read, so it was listed once.",
+                        ready.filename
+                    ));
+                }
+            } else if ready.error.is_empty() {
                 parsed += 1;
             } else {
                 errors += 1;
                 if messages.len() < 40 {
                     messages.push(format!("{}: {}", ready.filename, ready.error));
                 }
+            }
+            if duplicate {
+                let done = skipped + index as u32 + 1;
+                let minutes = (started.elapsed().as_secs_f64() / 60.0).max(0.001);
+                publish(
+                    progress,
+                    &on_update,
+                    Progress {
+                        done,
+                        total,
+                        parsed,
+                        skipped,
+                        errors,
+                        files_per_min: (done as f64) / minutes,
+                        current: ready.filename,
+                        state: if control.is_paused() { "paused".into() } else { "running".into() },
+                        messages: messages.clone(),
+                    },
+                );
+                continue;
             }
             {
                 let connection = conn.lock().unwrap();
@@ -439,6 +472,14 @@ fn parse_item(item: &Item) -> Ready {
     }
 }
 
+fn failed_item(item: &Item, message: &str) -> Ready {
+    let (path, filename) = match item {
+        Item::File(path) => (path.to_string_lossy().to_string(), file_label(path)),
+        Item::Memory { path, filename, .. } | Item::Failed { path, filename, .. } => (path.clone(), filename.clone()),
+    };
+    ready(path, filename, 0, 0, String::new(), crate::fields::Profile::blank(), message)
+}
+
 fn cancelled_item(item: &Item) -> Ready {
     let (path, filename) = match item {
         Item::File(path) => (path.to_string_lossy().to_string(), file_label(path)),
@@ -453,9 +494,12 @@ fn ready(
     size: i64,
     mtime: i64,
     hash: String,
-    profile: crate::fields::Profile,
+    mut profile: crate::fields::Profile,
     error: &str,
 ) -> Ready {
+    if profile.name.trim().is_empty() {
+        profile.name = crate::fields::name_from_filename(&filename);
+    }
     Ready {
         path,
         filename,
@@ -521,6 +565,24 @@ mod tests {
         ingest_path(&conn, &dir, &control, &progress, |_| {}).unwrap();
         assert_eq!(progress.lock().unwrap().skipped, 1000);
         assert_eq!(progress.lock().unwrap().parsed, 0);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn identical_files_are_listed_once() {
+        let dir = std::env::temp_dir().join(format!("scout-dup-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let body = "Gowla Kiran\nkiran@example.com\n4.1 years experience\nSkills: Java, Spring Boot\n";
+        fs::write(dir.join("kiran-a.txt"), body).unwrap();
+        fs::write(dir.join("kiran-b.txt"), body).unwrap();
+        let conn = Mutex::new(db::open_db(&dir.join("scout.db")).unwrap());
+        let control = Arc::new(Control::new());
+        let progress = Mutex::new(Progress::default());
+        ingest_path(&conn, &dir, &control, &progress, |_| {}).unwrap();
+        let connection = conn.lock().unwrap();
+        let rows = db::profiles_for_root(&connection, &dir.to_string_lossy()).unwrap();
+        assert_eq!(rows.len(), 1, "{:?}", rows.iter().map(|row| &row.filename).collect::<Vec<_>>());
         let _ = fs::remove_dir_all(&dir);
     }
 }

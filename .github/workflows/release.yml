@@ -27,7 +27,7 @@ jobs:
           releaseBody: |
             Windows 10 or 11. One setup file. No other programs to install.
 
-            This build includes the screening fixes: notice shown in days, a locked saved search, drafts that are not sent, and a sample portal of practice profiles.
+            This build fixes ranking and filters. Names are read from the resume, a copied file is listed once, Java does not match JavaScript, and a missing notice period stays in the list. The minimum match score starts at 50. Spring MVC, REST, MySQL, and Oracle are recognised. Preferably counts as an extra skill. Drafts are not sent.
 
             1. Download the setup file below (the name ends in setup.exe).
             2. Open it. If Windows says it protected your PC, choose More info, then Run anyway. This appears because the file is not from a paid certificate.

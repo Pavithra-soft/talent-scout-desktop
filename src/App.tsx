@@ -37,6 +37,7 @@ type Grid = {
   locations: string[];
   errors: string[];
   root: string;
+  stored: number;
   offline: boolean;
 };
 
@@ -71,7 +72,7 @@ const emptyFilters = (): Filters => ({
   skills: "",
   company: "",
   name: "",
-  score_min: null,
+  score_min: 50,
 });
 
 export default function App() {
@@ -138,7 +139,7 @@ export default function App() {
             }
             const job = jdRef.current.trim();
             const ranked = job
-              ? await invoke<Grid>("rank_profiles", { jdText: job, weights: weightsRef.current })
+              ? await invoke<Grid>("rank_profiles", { jdText: job, weights: weightsRef.current, filters: filtersRef.current })
               : loaded;
             if (job) setGrid(ranked);
             const names = ranked.rows
@@ -146,10 +147,12 @@ export default function App() {
               .filter((name) => name.trim().length > 0)
               .slice(0, 4);
             const who = names.length > 0 ? ` ${names.join(", ")}${ranked.rows.length > names.length ? `, and ${ranked.rows.length - names.length} more` : ""}.` : "";
+            const shown = ranked.rows.length;
+            const stored = ranked.stored || shown;
             setMessage(
               job
-                ? `Read ${ranked.rows.length} resumes and ranked them for this job.${who}`
-                : `Read ${ranked.rows.length} resumes.${who} Paste the job, then click See ranked candidates.`,
+                ? `Read ${stored} resumes. ${shown} match this job and the filters.${who}`
+                : `Read ${stored} resumes.${who} Paste the job, then click See ranked candidates.`,
             );
             showResults();
           })
@@ -161,11 +164,13 @@ export default function App() {
     }).catch(() => undefined);
     refresh().catch(() => undefined);
     refreshMail().catch(() => undefined);
-    const dropped = getCurrentWebview().onDragDropEvent((event) => {
-      if (event.payload.type === "drop" && event.payload.paths[0]) {
-        begin(event.payload.paths[0], false).catch((error: Error) => setMessage(plain(error)));
-      }
-    });
+    const dropped = Promise.resolve()
+      .then(() => getCurrentWebview().onDragDropEvent((event) => {
+        if (event.payload.type === "drop" && event.payload.paths[0]) {
+          begin(event.payload.paths[0], false).catch((error: Error) => setMessage(plain(error)));
+        }
+      }))
+      .catch(() => () => undefined);
     return () => {
       unlisten.then((stop) => stop());
       dropped.then((stop) => stop());
@@ -245,9 +250,9 @@ export default function App() {
   async function rank() {
     setMessage("");
     try {
-      const result = await invoke<Grid>("rank_profiles", { jdText: jd, weights });
+      const result = await invoke<Grid>("rank_profiles", { jdText: jd, weights, filters });
       setGrid(result);
-      setMessage(`${result.rows.length} candidates ranked on this computer.`);
+      setMessage(`${result.rows.length} of ${result.stored} candidates match this job and the filters.`);
     } catch (error) {
       setMessage(plain(error));
     }
@@ -385,7 +390,7 @@ export default function App() {
           </div>
         </details>
         <button type="button" onClick={rank}>See ranked candidates</button>
-        <p className="muted">JS counts as JavaScript. k8s counts as Kubernetes. Blank fields stay blank. Hover a match score to read why.</p>
+        <p className="muted">The list starts at a match score of 50. Clear Minimum match score and click Apply filters to see lower scores. Hover a match score to read why.</p>
       </section>
 
       <section ref={resultsRef}>
@@ -452,7 +457,7 @@ export default function App() {
                 );
               })}
               {(grid?.rows ?? []).length === 0 && (
-                <tr><td colSpan={12}>No candidates yet. Pick a folder and add the job.</td></tr>
+                <tr><td colSpan={12}>{grid?.root ? "No candidates match these filters. Clear a filter to see more people. The resumes are still on this computer." : "No candidates yet. Pick a folder and add the job."}</td></tr>
               )}
             </tbody>
           </table>

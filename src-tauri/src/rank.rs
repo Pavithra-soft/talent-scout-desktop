@@ -117,19 +117,23 @@ pub fn score_profile(
     let score = ((100.0 * points / total).round() as i32).clamp(0, 100);
     let mut matching = matched_must.clone();
     matching.extend(matched_nice.iter().cloned());
+    let experience_note = if listed_experience {
+        experience_line(experience_ratio, years)
+    } else {
+        "Experience was not requested."
+    };
+    let location_note = if listed_location {
+        location_line(location_ratio, location)
+    } else {
+        "A city was not requested."
+    };
     let rationale = if !listed_skills {
-        format!(
-            "This job did not list skills, so skills were not scored. {} {}",
-            experience_line(experience_ratio, years),
-            location_line(location_ratio, location)
-        )
+        format!("This job did not list skills, so skills were not scored. {experience_note} {location_note}")
     } else {
         format!(
-            "Matches {} of {} required skills. {} {}",
+            "Matches {} of {} required skills. {experience_note} {location_note}",
             matched_must.len(),
-            job.must_have.len(),
-            experience_line(experience_ratio, years),
-            location_line(location_ratio, location)
+            job.must_have.len()
         )
     };
     Score {
@@ -199,27 +203,44 @@ fn location_line(ratio: f32, location: &str) -> &'static str {
     }
 }
 
+fn section_at(lower: &str, labels: &[&str]) -> Option<usize> {
+    labels.iter().filter_map(|label| lower.find(label)).min()
+}
+
 fn split_sections(lower: &str, original: &str) -> (String, String) {
-    let must_at = ["must-have", "must have", "required"]
-        .iter()
-        .find_map(|label| lower.find(label));
-    let nice_at = ["nice-to-have", "nice to have", "preferred"]
-        .iter()
-        .find_map(|label| lower.find(label));
+    let must_at = section_at(lower, &["must-have", "must have", "required"]);
+    let nice_at = section_at(lower, &["nice-to-have", "nice to have", "preferably", "preferred", "good to have"]);
     match (must_at, nice_at) {
         (Some(must), Some(nice)) if nice > must => (
             original[must..nice].to_string(),
             original[nice..].to_string(),
         ),
+        (Some(must), Some(nice)) if must > nice => (
+            original[must..].to_string(),
+            original[nice..must].to_string(),
+        ),
         (Some(must), None) => (original[must..].to_string(), String::new()),
+        (None, Some(nice)) => (original[..nice].to_string(), original[nice..].to_string()),
         _ => (String::new(), String::new()),
     }
 }
 
+fn bounded_years<'a>(text: &'a str, pattern: &'a regex::Regex) -> Option<regex::Captures<'a>> {
+    pattern.captures_iter(text).find(|caps| {
+        let start = caps.get(0).map(|item| item.start()).unwrap_or(0);
+        let previous = text[..start].chars().next_back();
+        !previous.is_some_and(|ch| ch.is_ascii_digit() || ch == '.')
+    })
+}
+
 fn experience_range(text: &str) -> (Option<i32>, Option<i32>) {
-    let pattern = regex::Regex::new(r"(?i)(\d{1,2})\s*(?:to|-)\s*(\d{1,2})\s*(?:years|yrs)").unwrap();
-    if let Some(caps) = pattern.captures(text) {
-        return (caps[1].parse().ok(), caps[2].parse().ok());
+    let range = regex::Regex::new(r"(?i)(\d{1,2}(?:\.\d+)?)\s*(?:to|-|–)\s*(\d{1,2}(?:\.\d+)?)\s*(?:years|yrs)\b").unwrap();
+    if let Some(caps) = bounded_years(text, &range) {
+        return (crate::fields::round_years(&caps[1]), crate::fields::round_years(&caps[2]));
+    }
+    let plus = regex::Regex::new(r"(?i)(\d{1,2}(?:\.\d+)?)\s*\+\s*(?:years|yrs)\b").unwrap();
+    if let Some(caps) = bounded_years(text, &plus) {
+        return (crate::fields::round_years(&caps[1]), None);
     }
     (None, None)
 }
@@ -255,5 +276,25 @@ mod tests {
         let elsewhere = score_profile("Python", None, "Pune", &city_only, &Weights::default());
         assert_eq!(elsewhere.score, 0);
         assert!(elsewhere.rationale.contains("skills were not scored"));
+        assert!(elsewhere.rationale.contains("A city was not requested.") == false);
+        assert!(elsewhere.rationale.contains("Experience was not requested."));
+    }
+
+    #[test]
+    fn preferably_is_extra_and_unrequested_experience_is_not_a_fit() {
+        let job = parse_job("Strong hands-on experience in Core Java.\nGood experience with Spring Boot, Spring MVC and REST APIs.\nExperience in microservices architecture.\nGood knowledge of SQL, preferably MySQL/Oracle.\n");
+        assert!(job.must_have.contains(&"java".to_string()));
+        assert!(job.must_have.contains(&"spring mvc".to_string()));
+        assert!(job.must_have.contains(&"rest".to_string()));
+        assert!(job.nice_to_have.contains(&"mysql".to_string()));
+        assert!(job.nice_to_have.contains(&"oracle".to_string()));
+        assert!(job.min_years.is_none());
+        let full = score_profile("java, spring boot, spring mvc, rest, microservices, sql, mysql", Some(15), "Mumbai", &job, &Weights::default());
+        let plain = score_profile("java, spring boot, spring mvc, rest, microservices, sql", Some(1), "Pune", &job, &Weights::default());
+        assert!(full.score > plain.score);
+        assert!(full.rationale.contains("Experience was not requested."));
+        assert!(full.rationale.contains("A city was not requested."));
+        let plus = parse_job("Overall 8+ years of Java");
+        assert_eq!(plus.min_years, Some(8));
     }
 }

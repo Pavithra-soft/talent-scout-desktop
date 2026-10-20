@@ -58,6 +58,7 @@ struct Grid {
     locations: Vec<String>,
     errors: Vec<String>,
     root: String,
+    stored: i32,
     offline: bool,
 }
 
@@ -198,7 +199,7 @@ fn sample_jd() -> String {
 }
 
 #[tauri::command]
-fn rank_profiles(state: State<Scout>, jd_text: String, weights: Weights) -> Result<Grid, String> {
+fn rank_profiles(state: State<Scout>, jd_text: String, weights: Weights, filters: Filters) -> Result<Grid, String> {
     let trimmed = jd_text.trim();
     if trimmed.is_empty() {
         return Err("Paste the job first, then rank the candidates.".to_string());
@@ -225,7 +226,7 @@ fn rank_profiles(state: State<Scout>, jd_text: String, weights: Weights) -> Resu
         )?;
     }
     let _ = db::audit(&connection, "ranked", "current search");
-    grid_from(&connection, &Filters::default())
+    grid_from(&connection, &filters)
 }
 
 #[tauri::command]
@@ -308,6 +309,7 @@ fn grid_from(conn: &Connection, filters: &Filters) -> Result<Grid, String> {
         .map(|row| format!("{}: {}", row.filename, row.error))
         .take(40)
         .collect();
+    let stored = all.iter().filter(|row| row.error.is_empty()).count() as i32;
     let rows = filter::visible_rows(all, filters)
         .into_iter()
         .enumerate()
@@ -332,6 +334,7 @@ fn grid_from(conn: &Connection, filters: &Filters) -> Result<Grid, String> {
         locations,
         errors,
         root,
+        stored,
         offline: true,
     })
 }

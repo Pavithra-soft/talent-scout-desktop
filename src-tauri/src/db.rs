@@ -106,6 +106,18 @@ pub fn cached(conn: &Connection, path: &str) -> Option<(i64, i64, String, String
     .ok()
 }
 
+pub fn hash_saved(conn: &Connection, root: &str, hash: &str) -> bool {
+    if hash.is_empty() {
+        return false;
+    }
+    conn.query_row(
+        "SELECT 1 FROM profiles WHERE root = ?1 AND content_hash = ?2 AND error = '' LIMIT 1",
+        params![root, hash],
+        |_| Ok(1),
+    )
+    .is_ok()
+}
+
 pub fn touch_cache(conn: &Connection, path: &str, size: i64, mtime: i64) -> Result<(), String> {
     conn.execute(
         "UPDATE profiles SET size = ?1, mtime = ?2 WHERE path = ?3",

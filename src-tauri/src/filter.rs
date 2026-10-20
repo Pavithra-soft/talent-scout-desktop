@@ -1,6 +1,7 @@
 use serde::Deserialize;
 
 use crate::db::Stored;
+use crate::fields::matches_skill_query;
 
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct Filters {
@@ -24,13 +25,18 @@ pub fn visible_rows(rows: Vec<Stored>, filters: &Filters) -> Vec<Stored> {
     let notice = filters.notice.to_lowercase();
     if notice == "immediate" {
         kept.retain(|row| {
-            row.notice_days == Some(0) || row.notice_raw.to_lowercase().contains("serving notice")
+            row.notice_days.is_none()
+                || row.notice_days == Some(0)
+                || row.notice_raw.to_lowercase().contains("serving notice")
         });
     } else if matches!(notice.as_str(), "15" | "30" | "60" | "90") {
         let limit: i32 = notice.parse().unwrap_or(0);
-        kept.retain(|row| row.notice_days.is_some_and(|days| days <= limit));
+        kept.retain(|row| match row.notice_days {
+            Some(days) => days <= limit,
+            None => true,
+        });
     } else if notice == "custom" {
-        kept.retain(|row| in_range(row.notice_days, filters.notice_min, filters.notice_max));
+        kept.retain(|row| row.notice_days.is_none() || in_range(row.notice_days, filters.notice_min, filters.notice_max));
     }
     if !filters.locations.is_empty() {
         kept.retain(|row| {
@@ -40,7 +46,7 @@ pub fn visible_rows(rows: Vec<Stored>, filters: &Filters) -> Vec<Stored> {
                 .any(|city| city.eq_ignore_ascii_case(&row.location))
         });
     }
-    kept.retain(|row| contains(&row.skills, &filters.skills));
+    kept.retain(|row| matches_skill_query(&row.skills, &filters.skills));
     kept.retain(|row| contains(&row.company, &filters.company));
     kept.retain(|row| contains(&row.name, &filters.name));
     if let Some(min_score) = filters.score_min {
@@ -51,6 +57,7 @@ pub fn visible_rows(rows: Vec<Stored>, filters: &Filters) -> Vec<Stored> {
             .score
             .unwrap_or(-1)
             .cmp(&left.score.unwrap_or(-1))
+            .then_with(|| left.name.trim().is_empty().cmp(&right.name.trim().is_empty()))
             .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
     });
     kept

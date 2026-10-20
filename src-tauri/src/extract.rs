@@ -40,8 +40,13 @@ fn text_from_bytes(name: &str, bytes: &[u8]) -> Result<String, String> {
         return docx_text(bytes);
     }
     if lower.ends_with(".pdf") {
-        return pdf_extract::extract_text_from_mem(bytes)
-            .map_err(|_| "This PDF could not be read. Ask for an unlocked copy.".to_string());
+        let extracted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            pdf_extract::extract_text_from_mem(bytes)
+        }));
+        return match extracted {
+            Ok(Ok(text)) => Ok(text),
+            _ => Err("This PDF could not be read. Ask for an unlocked copy.".to_string()),
+        };
     }
     if lower.ends_with(".doc") {
         return Ok(doc_text(bytes));
@@ -188,6 +193,22 @@ mod tests {
         assert_eq!(profile.email, "ananya.rao@example.com");
         assert_eq!(profile.company, "Infosys");
         assert_eq!(profile.name, "Ananya Rao");
+    }
+
+    #[test]
+    fn recruiter_sample_pack_reads_pdf_and_word() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../samples/recruiter-test");
+        let mut names = Vec::new();
+        for entry in walkdir::WalkDir::new(&root).into_iter().filter_map(|item| item.ok()) {
+            if !entry.file_type().is_file() {
+                continue;
+            }
+            let profile = profile_from_path(entry.path()).unwrap_or_else(|err| panic!("{}: {err}", entry.path().display()));
+            assert!(!profile.email.is_empty(), "{}", entry.path().display());
+            assert!(!profile.name.is_empty(), "{}", entry.path().display());
+            names.push(profile.name);
+        }
+        assert_eq!(names.len(), 10, "{names:?}");
     }
 
     #[test]
