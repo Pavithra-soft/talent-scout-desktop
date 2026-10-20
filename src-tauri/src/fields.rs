@@ -165,6 +165,9 @@ pub fn name_from_filename(filename: &str) -> String {
             continue;
         }
         if is_heading_word(&bare) {
+            if words.is_empty() {
+                continue;
+            }
             break;
         }
         for part in split_camel(&bare) {
@@ -309,7 +312,7 @@ fn is_heading_word(word: &str) -> bool {
         "achievements", "strengths", "languages", "declaration", "overview", "senior", "junior", "lead", "intern",
         "java", "python", "sql", "linkedin", "github", "portfolio", "seeking", "dba", "devops", "data", "etl",
         "specialist", "associate", "analyst", "executive", "university", "college", "bachelor", "master", "tools",
-        "servers", "databases", "stack", "full", "role", "responsibilities", "responsibility", "duties",
+        "servers", "databases", "stack", "full", "naukri", "updated", "resume", "cv", "role", "responsibilities", "responsibility", "duties",
         "duration", "client", "description", "environment", "organization", "organisation", "designation", "month", "year",
     ]
     .iter()
@@ -642,7 +645,7 @@ const SKILLS: &[(&str, &[&str])] = &[
     ("aws", &["aws"]),
     ("mysql", &["mysql", "my sql"]),
     ("oracle", &["oracle"]),
-    ("sql", &["sql"]),
+    ("sql", &["sql", "mysql", "my sql", "oracle", "postgresql", "postgres"]),
     ("html", &["html"]),
     ("css", &["css"]),
     ("angular", &["angular"]),

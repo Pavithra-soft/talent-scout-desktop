@@ -1,6 +1,6 @@
 [package]
 name = "talent-scout-desktop"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 description = "Local recruiter screening. Resumes stay on this computer."
 authors = ["Pavithra-soft"]
@@ -28,7 +28,6 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 rust_xlsxwriter = "0.79"
 hex = "0.4"
 aes-gcm = "0.10"
-keyring = { version = "3", features = ["apple-native", "windows-native"] }
 
 [features]
 default = ["custom-protocol"]

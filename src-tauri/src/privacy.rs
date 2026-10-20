@@ -1,5 +1,6 @@
 use aes_gcm::aead::{Aead, AeadCore, KeyInit, OsRng};
 use aes_gcm::{Aes256Gcm, Key, Nonce};
+use std::path::{Path, PathBuf};
 
 const PREFIX: &str = "enc1:";
 
@@ -27,6 +28,13 @@ pub fn field_key() -> Result<[u8; 32], String> {
     }
 }
 
+static KEY_FILE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+pub fn set_key_dir(dir: &Path) {
+    let _ = std::fs::create_dir_all(dir);
+    let _ = KEY_FILE.set(dir.join("search.key"));
+}
+
 #[cfg(not(test))]
 fn key_from_keyring() -> Result<[u8; 32], String> {
     static CACHED: std::sync::OnceLock<[u8; 32]> = std::sync::OnceLock::new();
@@ -39,22 +47,40 @@ fn key_from_keyring() -> Result<[u8; 32], String> {
 }
 
 #[cfg(not(test))]
+fn key_path() -> PathBuf {
+    if let Some(path) = KEY_FILE.get() {
+        return path.clone();
+    }
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        return PathBuf::from(appdata).join("com.talentscout.desktop").join("search.key");
+    }
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    PathBuf::from(home)
+        .join("Library/Application Support/com.talentscout.desktop/search.key")
+}
+
+#[cfg(not(test))]
 fn load_or_create_key() -> Result<[u8; 32], String> {
-    let entry = keyring::Entry::new("Talent Scout Desktop", "saved-search")
-        .map_err(|_| "This computer could not open the lock for saved resumes. Restart the app and try again.".to_string())?;
-    match entry.get_password() {
-        Ok(existing) => decode_key(&existing),
-        Err(_) => {
-            let key = Aes256Gcm::generate_key(&mut OsRng);
-            let encoded = hex::encode(key.as_slice());
-            entry
-                .set_password(&encoded)
-                .map_err(|_| "This computer could not store the lock for saved resumes. Restart the app and try again.".to_string())?;
-            let mut out = [0u8; 32];
-            out.copy_from_slice(key.as_slice());
-            Ok(out)
+    let path = key_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|_| "This computer could not store the lock for saved resumes.".to_string())?;
+    }
+    if let Ok(existing) = std::fs::read_to_string(&path) {
+        if let Ok(key) = decode_key(existing.trim()) {
+            return Ok(key);
         }
     }
+    let key = Aes256Gcm::generate_key(&mut OsRng);
+    let encoded = hex::encode(key.as_slice());
+    std::fs::write(&path, &encoded).map_err(|_| "This computer could not store the lock for saved resumes.".to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    }
+    let mut out = [0u8; 32];
+    out.copy_from_slice(key.as_slice());
+    Ok(out)
 }
 
 #[cfg(not(test))]
@@ -124,32 +150,27 @@ pub fn clear_mail_token() -> Result<(), String> {
 }
 
 #[cfg(not(test))]
+fn mail_path() -> PathBuf {
+    key_path().with_file_name("email-drafts.txt")
+}
+
+#[cfg(not(test))]
 pub fn store_mail_token(token: &str, until: i64) -> Result<(), String> {
-    let entry = keyring::Entry::new("Talent Scout Desktop", "email-drafts")
-        .map_err(|_| "Email could not be connected on this computer. Try again.".to_string())?;
-    entry
-        .set_password(&format!("{until}:{token}"))
-        .map_err(|_| "Email could not be connected on this computer. Try again.".to_string())
+    std::fs::write(mail_path(), format!("{until}:{token}")).map_err(|_| "Email could not be connected on this computer. Try again.".to_string())
 }
 
 #[cfg(not(test))]
 pub fn read_mail_token() -> Result<Option<(String, i64)>, String> {
-    let entry = keyring::Entry::new("Talent Scout Desktop", "email-drafts")
-        .map_err(|_| "Email could not be checked on this computer. Try again.".to_string())?;
-    match entry.get_password() {
-        Ok(raw) => {
-            let (until, token) = raw.split_once(':').unwrap_or(("0", ""));
-            let until = until.parse().unwrap_or(0);
-            Ok(Some((token.to_string(), until)))
-        }
-        Err(_) => Ok(None),
-    }
+    let Ok(raw) = std::fs::read_to_string(mail_path()) else {
+        return Ok(None);
+    };
+    let (until, token) = raw.split_once(':').unwrap_or(("0", ""));
+    let until = until.parse().unwrap_or(0);
+    Ok(Some((token.to_string(), until)))
 }
 
 #[cfg(not(test))]
 pub fn clear_mail_token() -> Result<(), String> {
-    let entry = keyring::Entry::new("Talent Scout Desktop", "email-drafts")
-        .map_err(|_| "Email could not be disconnected on this computer. Try again.".to_string())?;
-    let _ = entry.delete_credential();
+    let _ = std::fs::remove_file(mail_path());
     Ok(())
 }

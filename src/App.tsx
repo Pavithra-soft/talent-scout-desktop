@@ -25,6 +25,7 @@ type Row = {
   skills: string;
   matching: string;
   missing: string;
+  years: number | null;
   company: string;
   notice: string;
   score: number | null;
@@ -38,6 +39,7 @@ type Grid = {
   errors: string[];
   root: string;
   stored: number;
+  jd: string;
   offline: boolean;
 };
 
@@ -84,13 +86,19 @@ export default function App() {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [pendingPath, setPendingPath] = useState("");
+  const [pendingFiles, setPendingFiles] = useState<string[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [subject, setSubject] = useState("Your profile");
-  const [draft, setDraft] = useState("We reviewed your resume and would like to talk.");
-  const [mail, setMail] = useState("Email is not connected. Drafts stay on this computer and are not sent.");
+  const [draft, setDraft] = useState("");
+  const [mail, setMail] = useState("Email is not connected. Enter the address you use in Mail or Outlook.");
+  const [fromEmail, setFromEmail] = useState("");
+  const [draftNote, setDraftNote] = useState("");
   const [portalPeople, setPortalPeople] = useState<PortalPerson[]>([]);
   const [portalNote, setPortalNote] = useState("");
   const [portalPick, setPortalPick] = useState<string[]>([]);
+  const [page, setPage] = useState<"rank" | "query">("rank");
+  const [queryJd, setQueryJd] = useState("");
+  const [portalQuery, setPortalQuery] = useState<{ keywords: string; boolean_query: string; experience: string; location: string } | null>(null);
   const filtersRef = useRef(filters);
   const jdRef = useRef(jd);
   const weightsRef = useRef(weights);
@@ -100,7 +108,16 @@ export default function App() {
   weightsRef.current = weights;
 
   async function refresh(next?: Filters) {
-    const result = await invoke<Grid>("list_results", { filters: next ?? filtersRef.current });
+    const filters = next ?? filtersRef.current;
+    let result = await invoke<Grid>("list_results", { filters });
+    const job = jdRef.current.trim() || result.jd.trim();
+    const needsScore = result.rows.some((row) => row.score === null);
+    if (job && needsScore) {
+      if (!jdRef.current.trim()) setJd(job);
+      result = await invoke<Grid>("rank_profiles", { jdText: job, weights: weightsRef.current, filters });
+    } else if (result.jd && !jdRef.current.trim()) {
+      setJd(result.jd);
+    }
     setGrid(result);
     return result;
   }
@@ -110,13 +127,14 @@ export default function App() {
   }
 
   async function refreshMail() {
-    const current = await invoke<{ connected: boolean; expired: boolean }>("mail_status");
+    const current = await invoke<{ connected: boolean; expired: boolean; address: string }>("mail_status");
+    if (current.address) setFromEmail(current.address);
     if (current.expired) {
-      setMail("Your email login has expired. Connect again. Nothing was sent.");
+      setMail("Your email connection has expired. Connect again. Nothing was sent.");
     } else if (current.connected) {
-      setMail("Email is connected for drafts only. Nothing is sent from this app.");
+      setMail(`Connected as ${current.address}. Drafts are prepared in Mail or Outlook. This app does not send them.`);
     } else {
-      setMail("Email is not connected. Drafts stay on this computer and are not sent.");
+      setMail("Enter the email address you already use in Mail or Outlook, then connect.");
     }
   }
 
@@ -205,6 +223,29 @@ export default function App() {
     }
   }
 
+  async function beginFiles(paths: string[], replace: boolean) {
+    setMessage("");
+    try {
+      if (!replace) {
+        const ready = await invoke<{ status: string }>("prepare_files", { paths });
+        if (ready.status === "confirm") {
+          setPendingFiles(paths);
+          setPendingPath("");
+          setMessage("Start a new search? People already listed will be cleared from this computer.");
+          return;
+        }
+      }
+      setPendingFiles([]);
+      setPendingPath("");
+      setBusy(true);
+      setSelected([]);
+      await invoke("ingest_files", { paths, replace });
+    } catch (error) {
+      setBusy(false);
+      setMessage(plain(error));
+    }
+  }
+
   async function chooseFiles() {
     const picked = await open({
       directory: false,
@@ -214,8 +255,7 @@ export default function App() {
     });
     const paths = Array.isArray(picked) ? picked : typeof picked === "string" ? [picked] : [];
     if (paths.length === 0) return;
-    const folder = paths[0].replace(/[/\\][^/\\]+$/, "");
-    await begin(folder, false);
+    await beginFiles(paths, false);
   }
 
   async function useSamples() {
@@ -239,6 +279,7 @@ export default function App() {
       setSelected([]);
       setPortalPeople([]);
       setPendingPath("");
+      setPendingFiles([]);
       setFilters(emptyFilters());
       await refresh(emptyFilters());
       setMessage("Started fresh. The saved search on this computer has been cleared.");
@@ -272,16 +313,45 @@ export default function App() {
     }
   }
 
+  async function connectMail() {
+    setDraftNote("Connecting to your email…");
+    try {
+      await invoke("connect_mail", { email: fromEmail });
+      await refreshMail();
+      setDraftNote("Connected. Tick Pick beside the candidates, then click Prepare drafts.");
+    } catch (error) {
+      setDraftNote(plain(error));
+    }
+  }
+
   async function saveDrafts() {
+    const job = jd.trim() || grid?.jd.trim() || "";
     const people = (grid?.rows ?? [])
       .filter((row) => selected.includes(rowKey(row)))
-      .map((row) => ({ name: row.name || "Candidate", email: row.email }));
+      .map((row) => ({
+        name: row.name || "Candidate",
+        email: row.email,
+        skills: row.skills,
+        matching: row.matching,
+        years: row.years,
+        location: row.location,
+        company: row.company,
+      }));
+    if (people.length === 0) {
+      setDraftNote("Tick Pick beside the candidates you want. Then click Prepare drafts again.");
+      return;
+    }
+    if (!job) {
+      setDraftNote("Paste the job in step 2. Each draft is written from that job and the candidate's profile.");
+      return;
+    }
+    setDraftNote("Writing a first note from the job, each profile, and your instructions. Mail will open. Nothing is sent.");
     try {
-      const count = await invoke<number>("save_drafts", { subject, body: draft, people });
-      setMessage(`Saved ${count} email drafts on this computer. Nothing was sent.`);
+      const count = await invoke<number>("save_drafts", { subject, instructions: draft, jdText: job, people });
+      setDraftNote(`Prepared ${count} draft${count === 1 ? "" : "s"}. Look at the Mail window. The message is unsent.`);
       await refreshMail();
     } catch (error) {
-      setMessage(plain(error));
+      setDraftNote(plain(error));
     }
   }
 
@@ -308,6 +378,20 @@ export default function App() {
     }
   }
 
+  async function applyFilters() {
+    const result = await refresh();
+    setMessage(`${result.rows.length} of ${result.stored} candidates match these filters. Rank 1 has the highest match score.`);
+    showResults();
+  }
+
+  async function resetFilters() {
+    const next = emptyFilters();
+    setFilters(next);
+    const result = await refresh(next);
+    setMessage(`Filters reset. ${result.rows.length} of ${result.stored} candidates are shown. The minimum score is 50.`);
+    showResults();
+  }
+
   function toggleCity(city: string) {
     setFilters((current) => {
       const locations = current.locations.includes(city)
@@ -315,6 +399,31 @@ export default function App() {
         : [...current.locations, city];
       return { ...current, locations };
     });
+  }
+
+  function openQueryPage() {
+    setQueryJd((current) => current.trim() ? current : jd);
+    setPage("query");
+  }
+
+  async function prepareQuery() {
+    setMessage("");
+    try {
+      const result = await invoke<{ keywords: string; boolean_query: string; experience: string; location: string }>("portal_query", { jdText: queryJd });
+      setPortalQuery(result);
+    } catch (error) {
+      setPortalQuery(null);
+      setMessage(plain(error));
+    }
+  }
+
+  async function copyText(text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setMessage("Copied. Paste it into the job portal search box. This app does not sign in to a portal.");
+    } catch {
+      setMessage("Select the query and copy it. This app does not sign in to a portal.");
+    }
   }
 
   function toggleRow(key: string) {
@@ -342,8 +451,39 @@ export default function App() {
       <header>
         <h1>Talent Scout Desktop</h1>
         <p>Resumes stay on this computer. Nothing is uploaded.</p>
+        <div className="row">
+          <button type="button" className={page === "rank" ? "" : "secondary"} onClick={() => setPage("rank")}>Rank resumes</button>
+          <button type="button" className={page === "query" ? "" : "secondary"} onClick={openQueryPage}>Portal search query</button>
+        </div>
       </header>
 
+      {page === "query" && (
+        <section>
+          <h2>Portal search query</h2>
+          <p className="muted">Paste a job description. The app prepares keywords you can paste into a job portal. It does not sign in to Naukri, LinkedIn, or any other site.</p>
+          <label>Job description
+            <textarea rows={8} value={queryJd} placeholder="Paste the job description here." onChange={(event) => setQueryJd(event.target.value)} />
+          </label>
+          <button type="button" onClick={() => prepareQuery().catch((error: Error) => setMessage(plain(error)))}>Prepare search query</button>
+          {message && <p>{message}</p>}
+          {portalQuery && (
+            <>
+              <label>Keywords
+                <textarea rows={3} readOnly value={portalQuery.keywords} />
+              </label>
+              <button type="button" className="secondary" onClick={() => copyText(portalQuery.keywords)}>Copy keywords</button>
+              <label>Boolean search
+                <textarea rows={4} readOnly value={portalQuery.boolean_query} />
+              </label>
+              <button type="button" className="secondary" onClick={() => copyText(portalQuery.boolean_query)}>Copy Boolean search</button>
+              <p>Experience: {portalQuery.experience}</p>
+              <p>City: {portalQuery.location}</p>
+            </>
+          )}
+        </section>
+      )}
+
+      {page === "rank" && <>
       <section>
         <h2>1. Pick a resume folder</h2>
         <div className="row">
@@ -359,7 +499,7 @@ export default function App() {
           <span style={{ width: `${percent}%` }} />
         </div>
         <p className="muted">{status}</p>
-        <p className="muted">In the folder window, the resume files may not be listed. That is normal. Click the folder, then Select Folder. Or click Choose resume files and pick the PDFs and Word files you can see. PDF, Word, and text files are read. Nothing is uploaded.</p>
+        <p className="muted">Choose resume folder reads every resume in that folder. Choose resume files reads only the PDF, Word, text, or zip files you tick. Nothing is uploaded.</p>
         {seen.length > 0 && (
           <p>Resumes read: {seen.join(", ")}{(grid?.rows.length ?? 0) > seen.length ? `, and ${(grid?.rows.length ?? 0) - seen.length} more` : ""}.</p>
         )}
@@ -371,6 +511,12 @@ export default function App() {
           <div className="row">
             <button type="button" onClick={() => begin(pendingPath, true)}>Yes, start a new search</button>
             <button type="button" className="secondary" onClick={() => { setPendingPath(""); setMessage(""); }}>Keep the current search</button>
+          </div>
+        )}
+        {pendingFiles.length > 0 && (
+          <div className="row">
+            <button type="button" onClick={() => beginFiles(pendingFiles, true)}>Yes, start a new search</button>
+            <button type="button" className="secondary" onClick={() => { setPendingFiles([]); setMessage(""); }}>Keep the current search</button>
           </div>
         )}
       </section>
@@ -427,13 +573,17 @@ export default function App() {
           ))}
           {(grid?.locations ?? []).length === 0 && <span className="muted">Cities appear after resumes are read.</span>}
         </div>
-        <button type="button" className="secondary" onClick={() => refresh().catch((error: Error) => setMessage(plain(error)))}>Apply filters</button>
+        <div className="row">
+          <button type="button" onClick={() => applyFilters().catch((error: Error) => setMessage(plain(error)))}>Apply filters</button>
+          <button type="button" className="secondary" onClick={() => resetFilters().catch((error: Error) => setMessage(plain(error)))}>Reset filters</button>
+        </div>
+        <p className="muted">Rank 1 is the best match. Required skills decide most of the score. Extra skills, years, and city count when the job lists them. Paste the job and click See ranked candidates to fill Match score and Matching skills. Reset filters puts the minimum score back to 50.</p>
         {message && <p>{message}</p>}
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Pick</th><th>Rank</th><th>Name</th><th>Email</th><th>Phone</th><th>Location</th><th>Skills</th><th>Matching skills</th><th>Missing skills</th><th>Company</th><th>Notice</th><th>Match score</th>
+                <th>Pick</th><th>Rank</th><th>Name</th><th>Match score</th><th>Matching skills</th><th>Experience</th><th>Email</th><th>Phone</th><th>Location</th><th>Skills</th><th>Company</th><th>Notice</th>
               </tr>
             </thead>
             <tbody>
@@ -444,20 +594,20 @@ export default function App() {
                     <td><input type="checkbox" aria-label={`Pick ${row.name || row.email || "candidate"}`} checked={selected.includes(key)} onChange={() => toggleRow(key)} /></td>
                     <td>{row.rank}</td>
                     <td>{row.name}{row.note ? <div className="muted">{row.note}</div> : null}</td>
+                    <td title={row.rationale}>{row.score ?? ""}</td>
+                    <td>{row.matching}</td>
+                    <td>{experienceLabel(row.years)}</td>
                     <td>{row.email}</td>
                     <td>{row.phone}</td>
                     <td>{row.location}</td>
                     <td>{row.skills}</td>
-                    <td>{row.matching}</td>
-                    <td>{row.missing}</td>
                     <td>{row.company}</td>
                     <td>{row.notice}</td>
-                    <td title={row.rationale}>{row.score ?? ""}</td>
                   </tr>
                 );
               })}
               {(grid?.rows ?? []).length === 0 && (
-                <tr><td colSpan={12}>{grid?.root ? "No candidates match these filters. Clear a filter to see more people. The resumes are still on this computer." : "No candidates yet. Pick a folder and add the job."}</td></tr>
+                <tr><td colSpan={12}>{grid && grid.stored > 0 ? "No candidates match these filters. Clear a filter to see more people. The resumes are still on this computer." : "No candidates yet. Pick a folder and add the job."}</td></tr>
               )}
             </tbody>
           </table>
@@ -472,14 +622,18 @@ export default function App() {
         <button type="button" onClick={download}>Download Excel</button>
         <h3>Email draft</h3>
         <p className="muted">{mail}</p>
+        <label>Your email <input type="email" value={fromEmail} placeholder="you@company.com" onChange={(event) => setFromEmail(event.target.value)} /></label>
         <div className="row">
-          <button type="button" className="secondary" onClick={() => invoke("connect_mail").then(refreshMail).catch((error: Error) => setMessage(plain(error)))}>Connect email</button>
-          <button type="button" className="secondary" onClick={() => invoke("disconnect_mail").then(refreshMail).catch((error: Error) => setMessage(plain(error)))}>Disconnect email</button>
+          <button type="button" className="secondary" onClick={() => connectMail()}>Connect email</button>
+          <button type="button" className="secondary" onClick={() => invoke("disconnect_mail").then(() => { setFromEmail(""); return refreshMail(); }).catch((error: Error) => setMessage(plain(error)))}>Disconnect email</button>
         </div>
-        <label>Subject <input type="text" value={subject} onChange={(event) => setSubject(event.target.value)} /></label>
-        <label>Message <textarea rows={4} value={draft} onChange={(event) => setDraft(event.target.value)} /></label>
-        <button type="button" onClick={saveDrafts}>Save drafts for selected candidates</button>
-        <p className="muted">Pick candidates in the list first. The draft is saved on this computer. This app does not send it.</p>
+        <label>Subject <input type="text" value={subject} placeholder="Leave as Your profile to write a subject from the job" onChange={(event) => setSubject(event.target.value)} /></label>
+        <label>Additional instructions
+          <textarea rows={3} value={draft} placeholder="Example: mention that the role is hybrid in Bengaluru, and ask for a 15 minute call." onChange={(event) => setDraft(event.target.value)} />
+        </label>
+        <button type="button" onClick={saveDrafts}>Prepare drafts for selected candidates</button>
+        {draftNote && <p>{draftNote}</p>}
+        <p className="muted">Tick Pick beside each candidate. The note uses the job, that person's skills and experience, and anything you add above. Mail opens the unsent draft. If macOS asks, allow Talent Scout Desktop to control Mail.</p>
         <h3>Sample portal</h3>
         <p className="muted">Practice data on this computer. A live job site is not searched, and no portal password is stored.</p>
         <button type="button" className="secondary" onClick={findPortal}>Find sample profiles for this job</button>
@@ -501,8 +655,14 @@ export default function App() {
         )}
         <button type="button" onClick={savePortal} disabled={portalPick.length === 0}>Save selected resumes to a folder</button>
       </section>
+      </>}
     </main>
   );
+}
+
+function experienceLabel(years: number | null) {
+  if (years === null || years === undefined) return "";
+  return years === 1 ? "1 year" : `${years} years`;
 }
 
 function rowKey(row: Row) {

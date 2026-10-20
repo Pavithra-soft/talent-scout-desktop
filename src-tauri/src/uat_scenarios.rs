@@ -74,27 +74,23 @@ fn recruiter_scenarios_s1_to_s6() {
     db::clear_search(&connection).unwrap();
     assert_eq!(db::profile_count(&connection), 0);
 
-    mail::connect(&connection).unwrap();
+    mail::connect(&connection, "recruiter@example.com").unwrap();
     let drafts = root.join("drafts");
-    let saved = mail::save_drafts(
-        &connection,
-        &drafts,
-        "Hello",
-        "First wording",
-        &[
-            ("Ananya Rao".into(), "a@example.com".into()),
-            ("Meera Iyer".into(), "b@example.com".into()),
-            ("Rahul Menon".into(), "c@example.com".into()),
-        ],
-    )
-    .unwrap();
+    let jd = "Java developer\nMust-have: Java\n";
+    let people = [
+        mail::DraftPerson { name: "Ananya Rao".into(), email: "a@example.com".into(), skills: "java".into(), matching: "java".into(), years: Some(6), location: "Bengaluru".into(), company: String::new() },
+        mail::DraftPerson { name: "Meera Iyer".into(), email: "b@example.com".into(), skills: "java".into(), matching: "java".into(), years: Some(4), location: "Pune".into(), company: String::new() },
+        mail::DraftPerson { name: "Rahul Menon".into(), email: "c@example.com".into(), skills: "java".into(), matching: "java".into(), years: Some(9), location: "Chennai".into(), company: String::new() },
+    ];
+    let saved = mail::save_drafts(&connection, &drafts, "Hello", "First wording", jd, &people).unwrap();
     assert_eq!(saved, 3);
     let edited = mail::save_drafts(
         &connection,
         &drafts,
         "Hello",
         "Edited wording",
-        &[("Ananya Rao".into(), "a@example.com".into())],
+        jd,
+        &[mail::DraftPerson { name: "Ananya Rao".into(), email: "a@example.com".into(), skills: "java".into(), matching: "java".into(), years: Some(6), location: "Bengaluru".into(), company: String::new() }],
     )
     .unwrap();
     assert_eq!(edited, 1);
@@ -131,9 +127,16 @@ fn recruiter_scenarios_s1_to_s6() {
     assert!(rank::parse_job("").must_have.is_empty());
     let empty_job = rank::score_profile("Java", Some(8), "Bengaluru", &rank::parse_job(""), &Weights::default());
     assert_eq!(empty_job.score, 0);
-    mail::connect(&connection).unwrap();
-    crate::privacy::store_mail_token("local-draft-only", 1).unwrap();
-    let expired = mail::save_drafts(&connection, &drafts, "Hello", "Hi", &[("Ananya Rao".into(), "a@example.com".into())]);
+    mail::connect(&connection, "recruiter@example.com").unwrap();
+    crate::privacy::store_mail_token("recruiter@example.com", 1).unwrap();
+    let expired = mail::save_drafts(
+        &connection,
+        &drafts,
+        "Hello",
+        "Hi",
+        jd,
+        &[mail::DraftPerson { name: "Ananya Rao".into(), email: "a@example.com".into(), skills: "java".into(), matching: "java".into(), years: None, location: String::new(), company: String::new() }],
+    );
     assert!(expired.unwrap_err().contains("expired"));
     let offline = portal::search(&connection, "Java developer").unwrap();
     assert!(!offline.people.is_empty());

@@ -4,9 +4,11 @@ mod extract;
 mod fields;
 mod filter;
 mod ingest;
+mod letter;
 mod mail;
 mod portal;
 mod privacy;
+mod query;
 mod rank;
 
 #[cfg(test)]
@@ -45,6 +47,7 @@ struct GridRow {
     skills: String,
     matching: String,
     missing: String,
+    years: Option<i32>,
     company: String,
     notice: String,
     score: Option<i32>,
@@ -59,6 +62,7 @@ struct Grid {
     errors: Vec<String>,
     root: String,
     stored: i32,
+    jd: String,
     offline: bool,
 }
 
@@ -71,12 +75,23 @@ struct Prepare {
 struct DraftPerson {
     name: String,
     email: String,
+    #[serde(default)]
+    skills: String,
+    #[serde(default)]
+    matching: String,
+    #[serde(default)]
+    years: Option<i32>,
+    #[serde(default)]
+    location: String,
+    #[serde(default)]
+    company: String,
 }
 
 #[derive(Serialize)]
 struct MailView {
     connected: bool,
     expired: bool,
+    address: String,
 }
 
 #[tauri::command]
@@ -96,6 +111,82 @@ fn prepare_folder(state: State<Scout>, path: String) -> Result<Prepare, String> 
 #[tauri::command]
 fn ingest_start(app: AppHandle, state: State<Scout>, path: String, replace: bool) -> Result<(), String> {
     start_ingest(&app, &state, PathBuf::from(path), replace)
+}
+
+#[tauri::command]
+fn prepare_files(state: State<Scout>, paths: Vec<String>) -> Result<Prepare, String> {
+    let files = file_paths(&paths)?;
+    let connection = state.db.lock().unwrap();
+    if files_need_confirm(&connection, &files) {
+        return Ok(Prepare { status: "confirm".to_string() });
+    }
+    Ok(Prepare { status: "ready".to_string() })
+}
+
+#[tauri::command]
+fn ingest_files(app: AppHandle, state: State<Scout>, paths: Vec<String>, replace: bool) -> Result<(), String> {
+    let files = file_paths(&paths)?;
+    if state.running.swap(true, Ordering::SeqCst) {
+        return Err("A folder is already being read. Wait for it to finish, or press Cancel.".to_string());
+    }
+    {
+        let connection = state.db.lock().unwrap();
+        if files_need_confirm(&connection, &files) && !replace {
+            state.running.store(false, Ordering::SeqCst);
+            return Err("Start a new search? People already listed will be cleared from this computer.".to_string());
+        }
+        if files_need_confirm(&connection, &files) {
+            db::clear_profiles(&connection).map_err(|err| {
+                state.running.store(false, Ordering::SeqCst);
+                err
+            })?;
+        }
+    }
+    let db = state.db.clone();
+    let control = state.control.clone();
+    let progress = state.progress.clone();
+    let running = state.running.clone();
+    let app = app.clone();
+    std::thread::spawn(move || {
+        if let Err(_err) = ingest::ingest_files(&db, &files, &control, &progress, |update| {
+            let _ = app.emit("ingest-progress", update);
+        }) {
+            if let Ok(mut current) = progress.lock() {
+                current.state = "done".to_string();
+                current.messages.push("The selected files could not be finished. Choose them again. Files already read are kept.".to_string());
+                let _ = app.emit("ingest-progress", &*current);
+            }
+        }
+        running.store(false, Ordering::SeqCst);
+        if let Ok(current) = progress.lock() {
+            let _ = app.emit("ingest-progress", &*current);
+        }
+    });
+    Ok(())
+}
+
+fn file_paths(paths: &[String]) -> Result<Vec<PathBuf>, String> {
+    if paths.is_empty() {
+        return Err("Choose at least one resume file.".to_string());
+    }
+    let mut files = Vec::new();
+    for path in paths {
+        let file = PathBuf::from(path);
+        if path.trim().is_empty() || !file.is_file() {
+            return Err("That file could not be opened. Choose the resume again.".to_string());
+        }
+        files.push(file);
+    }
+    Ok(files)
+}
+
+fn files_need_confirm(connection: &Connection, files: &[PathBuf]) -> bool {
+    if db::profile_count(connection) == 0 {
+        return false;
+    }
+    let root = db::get_setting(connection, "root");
+    let saved = db::get_setting(connection, "file_list");
+    root != ingest::SELECTED_FILES || saved != ingest::file_list_key(files)
 }
 
 #[tauri::command]
@@ -131,9 +222,9 @@ fn startup_note(state: State<Scout>) -> String {
 }
 
 #[tauri::command]
-fn connect_mail(state: State<Scout>) -> Result<(), String> {
+fn connect_mail(state: State<Scout>, email: String) -> Result<(), String> {
     let connection = state.db.lock().unwrap();
-    mail::connect(&connection)
+    mail::connect(&connection, &email)
 }
 
 #[tauri::command]
@@ -145,15 +236,31 @@ fn disconnect_mail(state: State<Scout>) -> Result<(), String> {
 #[tauri::command]
 fn mail_status() -> Result<MailView, String> {
     let current = mail::status()?;
-    Ok(MailView { connected: current.connected, expired: current.expired })
+    Ok(MailView { connected: current.connected, expired: current.expired, address: current.address })
 }
 
 #[tauri::command]
-fn save_drafts(app: AppHandle, state: State<Scout>, subject: String, body: String, people: Vec<DraftPerson>) -> Result<u32, String> {
+fn save_drafts(app: AppHandle, state: State<Scout>, subject: String, instructions: String, jd_text: String, people: Vec<DraftPerson>) -> Result<u32, String> {
     let dir = app.path().app_data_dir().map_err(|err| err.to_string())?;
     let connection = state.db.lock().unwrap();
-    let pairs: Vec<(String, String)> = people.into_iter().map(|person| (person.name, person.email)).collect();
-    mail::save_drafts(&connection, &mail::draft_folder(&dir), &subject, &body, &pairs)
+    let people: Vec<mail::DraftPerson> = people
+        .into_iter()
+        .map(|person| mail::DraftPerson {
+            name: person.name,
+            email: person.email,
+            skills: person.skills,
+            matching: person.matching,
+            years: person.years,
+            location: person.location,
+            company: person.company,
+        })
+        .collect();
+    mail::save_drafts(&connection, &mail::draft_folder(&dir), &subject, &instructions, &jd_text, &people)
+}
+
+#[tauri::command]
+fn portal_query(jd_text: String) -> Result<query::PortalQuery, String> {
+    query::portal_query(&jd_text)
 }
 
 #[tauri::command]
@@ -322,6 +429,7 @@ fn grid_from(conn: &Connection, filters: &Filters) -> Result<Grid, String> {
             skills: row.skills,
             matching: row.matching,
             missing: row.missing,
+            years: row.years,
             company: row.company,
             notice: row.notice_raw,
             score: row.score,
@@ -335,6 +443,7 @@ fn grid_from(conn: &Connection, filters: &Filters) -> Result<Grid, String> {
         errors,
         root,
         stored,
+        jd: db::get_setting(conn, "jd"),
         offline: true,
     })
 }
@@ -345,6 +454,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
+            privacy::set_key_dir(&dir);
             let db_path = dir.join("scout.db");
             let (database, note) = db::open_or_recover(&db_path).map_err(|err| std::io::Error::other(err))?;
             if !note.is_empty() {
@@ -362,6 +472,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             prepare_folder,
             ingest_start,
+            prepare_files,
+            ingest_files,
             load_samples,
             start_fresh,
             startup_note,
@@ -378,7 +490,8 @@ pub fn run() {
             mail_status,
             save_drafts,
             portal_search,
-            portal_download
+            portal_download,
+            portal_query
         ])
         .run(tauri::generate_context!())
         .expect("error while running Talent Scout Desktop");

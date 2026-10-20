@@ -50,7 +50,7 @@ pub fn visible_rows(rows: Vec<Stored>, filters: &Filters) -> Vec<Stored> {
     kept.retain(|row| contains(&row.company, &filters.company));
     kept.retain(|row| contains(&row.name, &filters.name));
     if let Some(min_score) = filters.score_min {
-        kept.retain(|row| row.score.is_some_and(|score| score >= min_score));
+        kept.retain(|row| row.score.map(|score| score >= min_score).unwrap_or(true));
     }
     kept.sort_by(|left, right| {
         right

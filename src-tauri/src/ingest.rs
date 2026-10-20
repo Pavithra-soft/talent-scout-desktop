@@ -126,6 +126,23 @@ pub fn require_folder(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+pub const SELECTED_FILES: &str = "selected-files";
+
+pub fn file_list_key(files: &[PathBuf]) -> String {
+    let mut names: Vec<String> = files
+        .iter()
+        .map(|path| {
+            path.canonicalize()
+                .unwrap_or_else(|_| path.clone())
+                .to_string_lossy()
+                .to_string()
+        })
+        .collect();
+    names.sort();
+    names.dedup();
+    names.join("\n")
+}
+
 pub fn ingest_path(
     conn: &Mutex<Connection>,
     root: &Path,
@@ -133,16 +150,81 @@ pub fn ingest_path(
     progress: &Mutex<Progress>,
     on_update: impl Fn(&Progress),
 ) -> Result<(), String> {
+    let root_text = root.to_string_lossy().to_string();
+    {
+        let connection = conn.lock().unwrap();
+        db::set_setting(&connection, "file_list", "")?;
+    }
+    ingest_items(conn, &root_text, collect(root)?, control, progress, on_update)
+}
+
+pub fn ingest_files(
+    conn: &Mutex<Connection>,
+    files: &[PathBuf],
+    control: &Arc<Control>,
+    progress: &Mutex<Progress>,
+    on_update: impl Fn(&Progress),
+) -> Result<(), String> {
+    if files.is_empty() {
+        return Err("Choose at least one resume file.".to_string());
+    }
+    let mut items = Vec::new();
+    for path in files {
+        items.extend(selected_item(path));
+    }
+    {
+        let connection = conn.lock().unwrap();
+        db::set_setting(&connection, "file_list", &file_list_key(files))?;
+    }
+    ingest_items(conn, SELECTED_FILES, items, control, progress, on_update)
+}
+
+fn selected_item(path: &Path) -> Vec<Item> {
+    let filename = file_label(path);
+    let path_text = path.to_string_lossy().to_string();
+    if !path.exists() {
+        return vec![Item::Failed {
+            path: path_text,
+            filename,
+            message: "That file could not be opened. Choose the resume again.".to_string(),
+        }];
+    }
+    if path.is_dir() {
+        return vec![Item::Failed {
+            path: path_text,
+            filename,
+            message: "This is a folder. Use Choose resume folder to read a whole folder.".to_string(),
+        }];
+    }
+    let found = file_item(path);
+    if found.is_empty() {
+        return vec![Item::Failed {
+            path: path_text,
+            filename,
+            message: "This file type is not read. Choose a PDF, Word, text, or zip file.".to_string(),
+        }];
+    }
+    found
+}
+
+fn ingest_items(
+    conn: &Mutex<Connection>,
+    root_text: &str,
+    items: Vec<Item>,
+    control: &Arc<Control>,
+    progress: &Mutex<Progress>,
+    on_update: impl Fn(&Progress),
+) -> Result<(), String> {
     control.reset();
     let started = Instant::now();
-    let root_text = root.to_string_lossy().to_string();
+    let root_text = root_text.to_string();
     {
         let connection = conn.lock().unwrap();
         db::set_setting(&connection, "root", &root_text)?;
     }
     let mut todo = Vec::new();
     let mut skipped = 0u32;
-    for item in collect(root)? {
+    for item in items {
         if !control.wait_if_paused() {
             break;
         }
@@ -583,6 +665,27 @@ mod tests {
         let connection = conn.lock().unwrap();
         let rows = db::profiles_for_root(&connection, &dir.to_string_lossy()).unwrap();
         assert_eq!(rows.len(), 1, "{:?}", rows.iter().map(|row| &row.filename).collect::<Vec<_>>());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn selected_files_leave_the_rest_of_the_folder_unread() {
+        let dir = std::env::temp_dir().join(format!("scout-picked-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("nested")).unwrap();
+        let picked = dir.join("ananya.txt");
+        fs::write(&picked, "Ananya Rao\nananya@example.com\nSkills: Java, Spring Boot\n6 years experience\n").unwrap();
+        fs::write(dir.join("nested").join("meera.txt"), "Meera Iyer\nmeera@example.com\nSkills: Python\n4 years experience\n").unwrap();
+        fs::write(dir.join("notes.md"), "not a resume").unwrap();
+        let conn = Mutex::new(db::open_db(&dir.join("scout.db")).unwrap());
+        let control = Arc::new(Control::new());
+        let progress = Mutex::new(Progress::default());
+        ingest_files(&conn, &[picked], &control, &progress, |_| {}).unwrap();
+        let connection = conn.lock().unwrap();
+        let rows = db::profiles_for_root(&connection, SELECTED_FILES).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].filename, "ananya.txt");
+        assert_eq!(progress.lock().unwrap().parsed, 1);
         let _ = fs::remove_dir_all(&dir);
     }
 }

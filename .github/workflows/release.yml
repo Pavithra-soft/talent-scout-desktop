@@ -27,13 +27,17 @@ jobs:
           releaseBody: |
             Windows 10 or 11. One setup file. No other programs to install.
 
-            This build keeps the saved names and skills unlocked on this computer. After installing, click Start fresh, choose the resume folder again, and paste the job. The list starts at a match score of 50. Drafts are not sent.
+            This build does not ask for a password. After installing over an older copy, click Start fresh, choose the resume folder again, and paste the job. The list starts at a match score of 50.
+
+            Choose resume files reads only the files you tick. Choose resume folder still reads the whole folder. The Experience column shows each person's years. Portal search query turns a job into keywords you can paste into a job site. The app does not sign in to a job site.
+
+            Email drafts are prepared in Mail or Outlook from the job, the candidate, and any extra instructions. They are not sent.
 
             1. Download the setup file below (the name ends in setup.exe).
             2. Open it. If Windows says it protected your PC, choose More info, then Run anyway. This appears because the file is not from a paid certificate.
             3. Finish the setup. It does not need an administrator password.
             4. Open Talent Scout Desktop from the Start menu.
-            5. Choose a folder of resumes, paste the job, look at the ranked list, then download Excel or save an email draft. Drafts stay on this computer and are not sent.
+            5. Choose resumes, paste the job, look at the ranked list, then download Excel or prepare an email draft.
 
             To remove the app, use Settings, Apps. The uninstaller asks whether to delete the saved search. The default is No.
           releaseDraft: false
