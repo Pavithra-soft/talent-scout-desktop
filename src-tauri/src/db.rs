@@ -97,6 +97,13 @@ fn show(value: String) -> Result<String, String> {
     crate::privacy::open_field(&value)
 }
 
+fn reveal(value: String) -> (String, bool) {
+    match show(value) {
+        Ok(text) => (text, false),
+        Err(_) => (String::new(), true),
+    }
+}
+
 pub fn cached(conn: &Connection, path: &str) -> Option<(i64, i64, String, String)> {
     conn.query_row(
         "SELECT size, mtime, content_hash, error FROM profiles WHERE path = ?1",
@@ -207,22 +214,46 @@ pub fn profiles_for_root(conn: &Connection, root: &str) -> Result<Vec<Stored>, S
         .map_err(|err| err.to_string())?;
     let rows = stmt
         .query_map([root], |row| {
+            let path: String = row.get(0)?;
+            let (filename, file_locked) = reveal(row.get(1)?);
+            let (name, name_locked) = reveal(row.get(5)?);
+            let (email, email_locked) = reveal(row.get(6)?);
+            let (phone, phone_locked) = reveal(row.get(7)?);
+            let (location, location_locked) = reveal(row.get(8)?);
+            let (skills, skills_locked) = reveal(row.get(9)?);
+            let (company, company_locked) = reveal(row.get(10)?);
+            let (notice_raw, notice_locked) = reveal(row.get(12)?);
+            let mut error: String = row.get(14)?;
+            if error.is_empty()
+                && (file_locked || name_locked || email_locked || phone_locked || location_locked || skills_locked || company_locked || notice_locked)
+            {
+                error = "This saved resume could not be unlocked. Click Start fresh and read the folder again.".to_string();
+            }
+            let filename = if filename.is_empty() {
+                Path::new(&path)
+                    .file_name()
+                    .and_then(|item| item.to_str())
+                    .unwrap_or("resume")
+                    .to_string()
+            } else {
+                filename
+            };
             Ok(Stored {
-                path: row.get(0)?,
-                filename: show(row.get(1)?).unwrap_or_default(),
+                path,
+                filename,
                 size: row.get(2)?,
                 mtime: row.get(3)?,
                 content_hash: row.get(4)?,
-                name: show(row.get(5)?).unwrap_or_default(),
-                email: show(row.get(6)?).unwrap_or_default(),
-                phone: show(row.get(7)?).unwrap_or_default(),
-                location: show(row.get(8)?).unwrap_or_default(),
-                skills: show(row.get(9)?).unwrap_or_default(),
-                company: show(row.get(10)?).unwrap_or_default(),
+                name,
+                email,
+                phone,
+                location,
+                skills,
+                company,
                 years: row.get(11)?,
-                notice_raw: show(row.get(12)?).unwrap_or_default(),
+                notice_raw,
                 notice_days: row.get(13)?,
-                error: row.get(14)?,
+                error,
                 note: row.get(15).unwrap_or_default(),
                 score: row.get(16)?,
                 matching: row.get(17).unwrap_or_default(),

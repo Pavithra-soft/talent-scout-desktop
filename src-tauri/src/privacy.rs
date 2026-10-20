@@ -29,6 +29,17 @@ pub fn field_key() -> Result<[u8; 32], String> {
 
 #[cfg(not(test))]
 fn key_from_keyring() -> Result<[u8; 32], String> {
+    static CACHED: std::sync::OnceLock<[u8; 32]> = std::sync::OnceLock::new();
+    if let Some(key) = CACHED.get() {
+        return Ok(*key);
+    }
+    let key = load_or_create_key()?;
+    let _ = CACHED.set(key);
+    Ok(key)
+}
+
+#[cfg(not(test))]
+fn load_or_create_key() -> Result<[u8; 32], String> {
     let entry = keyring::Entry::new("Talent Scout Desktop", "saved-search")
         .map_err(|_| "This computer could not open the lock for saved resumes. Restart the app and try again.".to_string())?;
     match entry.get_password() {
