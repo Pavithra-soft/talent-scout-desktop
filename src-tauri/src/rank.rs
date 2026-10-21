@@ -252,6 +252,21 @@ mod tests {
     const JD: &str = "Backend engineer, Bengaluru\n\nMust-have: Java, Spring Boot, Kafka\nNice-to-have: JavaScript, Kubernetes\nExperience: 5-9 years\nLocation: Bengaluru\n";
 
     #[test]
+    fn a_different_job_ranks_the_people_who_fit_that_job() {
+        let java = parse_job("Java developer with Spring Boot");
+        let idmc = parse_job("Informatica IDMC developer with PowerCenter");
+        let aparna = "informatica, idmc, powercenter, etl, sql";
+        let rahul = "java, spring boot, sql";
+        let weights = Weights::default();
+        let aparna_idmc = score_profile(aparna, Some(7), "Bengaluru", &idmc, &weights);
+        let rahul_idmc = score_profile(rahul, Some(8), "Bengaluru", &idmc, &weights);
+        let aparna_java = score_profile(aparna, Some(7), "Bengaluru", &java, &weights);
+        assert!(aparna_idmc.score > rahul_idmc.score);
+        assert!(aparna_idmc.matching.iter().any(|skill| skill == "idmc"));
+        assert!(aparna_java.score < score_profile(rahul, Some(8), "Bengaluru", &java, &weights).score);
+    }
+
+    #[test]
     fn java_profile_scores_above_python() {
         let job = parse_job(JD);
         assert!(job.must_have.contains(&"java".to_string()));

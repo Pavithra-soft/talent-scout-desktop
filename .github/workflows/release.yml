@@ -29,6 +29,8 @@ jobs:
 
             This build does not ask for a password. After installing over an older copy, click Start fresh, choose the resume folder again, and paste the job. The list starts at a match score of 50.
 
+            Paste a different job and click See ranked candidates. The list is scored against the job in the box. Informatica, IDMC, PowerCenter, and Talend are included.
+
             Choose resume files reads only the files you tick. Choose resume folder still reads the whole folder. The Experience column shows each person's years. Portal search query turns a job into keywords you can paste into a job site. The app does not sign in to a job site.
 
             Email drafts are prepared in Mail or Outlook from the job, the candidate, and any extra instructions. They are not sent.

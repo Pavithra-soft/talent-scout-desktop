@@ -11,6 +11,8 @@ use walkdir::WalkDir;
 
 use crate::db::{self, Stored};
 use crate::extract::{allowed_name, profile_from_bytes, profile_from_path};
+
+const PARSER: &str = "2";
 use rusqlite::Connection;
 
 #[derive(Clone, serde::Serialize)]
@@ -379,6 +381,7 @@ fn ingest_items(
         let connection = conn.lock().unwrap();
         let _ = db::mark_duplicate_emails(&connection, &root_text);
         let _ = db::set_setting(&connection, "saved_at", &chrono::Utc::now().timestamp().to_string());
+        let _ = db::set_setting(&connection, "parser", PARSER);
         let done = progress.lock().unwrap().clone();
         let _ = db::audit(
             &connection,
@@ -412,6 +415,9 @@ fn should_skip(conn: &Mutex<Connection>, item: &Item) -> Result<bool, String> {
             let size = meta.len() as i64;
             let mtime = mtime_of(&meta);
             let connection = conn.lock().unwrap();
+            if db::get_setting(&connection, "parser") != PARSER {
+                return Ok(false);
+            }
             let Some((cached_size, cached_mtime, cached_hash, error)) = db::cached(&connection, &path.to_string_lossy()) else {
                 return Ok(false);
             };
@@ -429,6 +435,9 @@ fn should_skip(conn: &Mutex<Connection>, item: &Item) -> Result<bool, String> {
         }
         Item::Memory { path, bytes, .. } => {
             let connection = conn.lock().unwrap();
+            if db::get_setting(&connection, "parser") != PARSER {
+                return Ok(false);
+            }
             let Some((_, _, cached_hash, error)) = db::cached(&connection, path) else {
                 return Ok(false);
             };

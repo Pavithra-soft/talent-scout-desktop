@@ -183,6 +183,15 @@ pub fn save_profile(conn: &Connection, root: &str, item: &Stored) -> Result<(), 
     Ok(())
 }
 
+pub fn replace_skills(conn: &Connection, path: &str, skills: &str) -> Result<(), String> {
+    conn.execute(
+        "UPDATE profiles SET skills = ?1 WHERE path = ?2",
+        params![hide(skills)?, path],
+    )
+    .map_err(|err| err.to_string())?;
+    Ok(())
+}
+
 pub fn save_score(
     conn: &Connection,
     path: &str,

@@ -110,8 +110,10 @@ export default function App() {
   async function refresh(next?: Filters) {
     const filters = next ?? filtersRef.current;
     let result = await invoke<Grid>("list_results", { filters });
-    const job = jdRef.current.trim() || result.jd.trim();
-    const needsScore = result.rows.some((row) => row.score === null);
+    const typed = jdRef.current.trim();
+    const job = typed || result.jd.trim();
+    const jobChanged = typed.length > 0 && typed !== result.jd.trim();
+    const needsScore = jobChanged || result.rows.some((row) => row.score === null);
     if (job && needsScore) {
       if (!jdRef.current.trim()) setJd(job);
       result = await invoke<Grid>("rank_profiles", { jdText: job, weights: weightsRef.current, filters });
@@ -293,7 +295,7 @@ export default function App() {
     try {
       const result = await invoke<Grid>("rank_profiles", { jdText: jd, weights, filters });
       setGrid(result);
-      setMessage(`${result.rows.length} of ${result.stored} candidates match this job and the filters.`);
+      setMessage(`${result.rows.length} of ${result.stored} candidates match the job in the box. Rank 1 is the closest.`);
     } catch (error) {
       setMessage(plain(error));
     }
@@ -577,7 +579,7 @@ export default function App() {
           <button type="button" onClick={() => applyFilters().catch((error: Error) => setMessage(plain(error)))}>Apply filters</button>
           <button type="button" className="secondary" onClick={() => resetFilters().catch((error: Error) => setMessage(plain(error)))}>Reset filters</button>
         </div>
-        <p className="muted">Rank 1 is the best match. Required skills decide most of the score. Extra skills, years, and city count when the job lists them. Paste the job and click See ranked candidates to fill Match score and Matching skills. Reset filters puts the minimum score back to 50.</p>
+        <p className="muted">Rank 1 is the best match for the job in the box. Replace that job and click See ranked candidates or Apply filters to score everyone against the new job. Reset filters puts the minimum score back to 50.</p>
         {message && <p>{message}</p>}
         <div className="table-wrap">
           <table>

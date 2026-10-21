@@ -115,7 +115,13 @@ pub fn matches_skill_query(skills: &str, query: &str) -> bool {
     if terms.is_empty() {
         return true;
     }
-    let haystack = format!(" {} ", skills.to_lowercase().replace(['/', ',', ';', '|', '\n'], " "));
+    let collapsed = skills
+        .to_lowercase()
+        .replace(['/', ',', ';', '|', '\n'], " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let haystack = format!(" {collapsed} ");
     terms.iter().all(|term| contains_term(&haystack, term))
 }
 
@@ -662,6 +668,14 @@ const SKILLS: &[(&str, &[&str])] = &[
     ("j2ee", &["j2ee", "java ee"]),
     ("jsf", &["jsf"]),
     ("tomcat", &["tomcat"]),
+    ("informatica", &["informatica"]),
+    ("idmc", &["idmc", "informatica data management cloud"]),
+    ("powercenter", &["powercenter", "power center"]),
+    ("iics", &["iics", "informatica cloud"]),
+    ("talend", &["talend"]),
+    ("etl", &["etl"]),
+    ("ssis", &["ssis"]),
+    ("plsql", &["plsql", "pl sql"]),
 ];
 
 struct Patterns {
@@ -820,5 +834,13 @@ mod tests {
         assert!(skills.contains(&"rest".to_string()));
         assert!(skills.contains(&"mysql".to_string()));
         assert!(skills.contains(&"oracle".to_string()));
+        let aparna = find_skills("ETL Tools: Informatica, Talend and IDMC. Environment: Informatica power center, IDMC.");
+        assert!(aparna.contains(&"informatica".to_string()));
+        assert!(aparna.contains(&"idmc".to_string()));
+        assert!(aparna.contains(&"powercenter".to_string()));
+        assert!(aparna.contains(&"talend".to_string()));
+        assert!(aparna.contains(&"etl".to_string()));
+        let saved = aparna.join(", ");
+        assert!(matches_skill_query(&saved, "IDMC, Informatica"));
     }
 }

@@ -322,7 +322,11 @@ fn rank_profiles(state: State<Scout>, jd_text: String, weights: Weights, filters
         if !profile.error.is_empty() {
             continue;
         }
-        let scored = rank::score_profile(&profile.skills, profile.years, &profile.location, &job, &weights);
+        let (skills, years, location) = skills_for_this_job(&profile);
+        if skills != profile.skills {
+            let _ = db::replace_skills(&connection, &profile.path, &skills);
+        }
+        let scored = rank::score_profile(&skills, years, &location, &job, &weights);
         db::save_score(
             &connection,
             &profile.path,
@@ -334,6 +338,21 @@ fn rank_profiles(state: State<Scout>, jd_text: String, weights: Weights, filters
     }
     let _ = db::audit(&connection, "ranked", "current search");
     grid_from(&connection, &filters)
+}
+
+#[tauri::command]
+fn skills_for_this_job(profile: &db::Stored) -> (String, Option<i32>, String) {
+    let path = std::path::Path::new(&profile.path);
+    if path.is_file() {
+        if let Ok(fresh) = crate::extract::profile_from_path(path) {
+            if !fresh.skills.is_empty() {
+                let years = fresh.years.or(profile.years);
+                let location = if fresh.location.is_empty() { profile.location.clone() } else { fresh.location };
+                return (fresh.skills, years, location);
+            }
+        }
+    }
+    (profile.skills.clone(), profile.years, profile.location.clone())
 }
 
 #[tauri::command]
