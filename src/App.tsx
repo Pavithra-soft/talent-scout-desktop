@@ -31,7 +31,21 @@ type Row = {
   score: number | null;
   rationale: string;
   note: string;
+  path: string;
 };
+
+type ProjectSkill = {
+  title: string;
+  skills: string[];
+};
+
+type Dossier = {
+  qualification: string[];
+  projects: ProjectSkill[];
+  lines: string[];
+};
+
+type ProfileView = "highlights" | "profile";
 
 type Grid = {
   rows: Row[];
@@ -93,6 +107,13 @@ export default function App() {
   const [mail, setMail] = useState("Email is not connected. Enter the address you use in Mail or Outlook.");
   const [fromEmail, setFromEmail] = useState("");
   const [draftNote, setDraftNote] = useState("");
+  const [profile, setProfile] = useState<Row | null>(null);
+  const [dossier, setDossier] = useState<Dossier | null>(null);
+  const [profileNote, setProfileNote] = useState("");
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [profileView, setProfileView] = useState<ProfileView>("highlights");
+  const openedPath = useRef("");
+  const dossierRef = useRef<Dossier | null>(null);
   const [portalPeople, setPortalPeople] = useState<PortalPerson[]>([]);
   const [portalNote, setPortalNote] = useState("");
   const [portalPick, setPortalPick] = useState<string[]>([]);
@@ -139,6 +160,15 @@ export default function App() {
       setMail("Enter the email address you already use in Mail or Outlook, then connect.");
     }
   }
+
+  useEffect(() => {
+    if (!profile) return;
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") closeProfile();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [profile]);
 
   useEffect(() => {
     const unlisten = listen<Progress>("ingest-progress", (event) => {
@@ -287,6 +317,50 @@ export default function App() {
       setMessage("Started fresh. The saved search on this computer has been cleared.");
     } catch (error) {
       setMessage(plain(error));
+    }
+  }
+
+  function closeProfile() {
+    openedPath.current = "";
+    setProfile(null);
+    setDossier(null);
+    dossierRef.current = null;
+    setProfileNote("");
+    setProfileLoading(false);
+    setProfileView("highlights");
+  }
+
+  async function openProfile(row: Row, view: ProfileView = "highlights") {
+    setProfileView(view);
+    setProfile(row);
+    setProfileNote("");
+    if (openedPath.current === row.path && dossierRef.current) return;
+    openedPath.current = row.path;
+    setDossier(null);
+    dossierRef.current = null;
+    setProfileLoading(true);
+    try {
+      const result = await invoke<Dossier>("open_profile", { path: row.path });
+      if (openedPath.current !== row.path) return;
+      dossierRef.current = result;
+      setDossier(result);
+    } catch (error) {
+      if (openedPath.current !== row.path) return;
+      setProfileNote(plain(error));
+    } finally {
+      if (openedPath.current === row.path) setProfileLoading(false);
+    }
+  }
+
+  async function downloadProfile(row: Row) {
+    const filename = row.path.split(/[/\\]/).pop() || "resume";
+    const dest = await save({ defaultPath: filename });
+    if (typeof dest !== "string") return;
+    try {
+      await invoke("save_resume_copy", { source: row.path, dest });
+      setProfileNote("Saved the resume file. It is the original document.");
+    } catch (error) {
+      setProfileNote(plain(error));
     }
   }
 
@@ -595,7 +669,13 @@ export default function App() {
                   <tr key={key}>
                     <td><input type="checkbox" aria-label={`Pick ${row.name || row.email || "candidate"}`} checked={selected.includes(key)} onChange={() => toggleRow(key)} /></td>
                     <td>{row.rank}</td>
-                    <td>{row.name}{row.note ? <div className="muted">{row.note}</div> : null}</td>
+                    <td>
+                      <div className="name-cell">
+                        <button type="button" className="link" onClick={() => openProfile(row, "highlights").catch((error: Error) => setProfileNote(plain(error)))}>{row.name || "Open profile"}</button>
+                        <button type="button" className="text-action" onClick={() => openProfile(row, "profile").catch((error: Error) => setProfileNote(plain(error)))}>View profile</button>
+                      </div>
+                      {row.note ? <div className="muted">{row.note}</div> : null}
+                    </td>
                     <td title={row.rationale}>{row.score ?? ""}</td>
                     <td>{row.matching}</td>
                     <td>{experienceLabel(row.years)}</td>
@@ -658,8 +738,87 @@ export default function App() {
         <button type="button" onClick={savePortal} disabled={portalPick.length === 0}>Save selected resumes to a folder</button>
       </section>
       </>}
+      {profile && (
+        <div className="sheet-back" onClick={closeProfile}>
+          <section className="sheet" role="dialog" aria-modal="true" aria-labelledby="profile-title" onClick={(event) => event.stopPropagation()}>
+            <div className="sheet-head">
+              <h2 id="profile-title">{profile.name || "Profile"}</h2>
+              <button type="button" className="secondary" autoFocus onClick={closeProfile}>Close</button>
+            </div>
+            <p className="muted">{[profile.company, profile.location, experienceLabel(profile.years)].filter(Boolean).join(" · ") || "Resume details"}</p>
+            {(profile.email || profile.phone) && <p>{[profile.email, profile.phone].filter(Boolean).join(" · ")}</p>}
+            <div className="view-switch" role="tablist" aria-label="Profile sections">
+              <button type="button" role="tab" aria-selected={profileView === "highlights"} className={profileView === "highlights" ? "on" : ""} onClick={() => setProfileView("highlights")}>Highlights</button>
+              <button type="button" role="tab" aria-selected={profileView === "profile"} className={profileView === "profile" ? "on" : ""} onClick={() => setProfileView("profile")}>Profile</button>
+            </div>
+            {profileView === "profile" ? (
+              <div>
+                {profile.skills && <p><strong>Skills. </strong>{profile.skills}</p>}
+                <p className="muted">{[profile.notice && `Notice: ${profile.notice}`, profile.score !== null ? `Match score ${profile.score}` : ""].filter(Boolean).join(" · ")}</p>
+                {profileLoading ? (
+                  <p className="muted">Reading the resume…</p>
+                ) : dossier && dossier.lines.length > 0 ? (
+                  <div className="resume-view">
+                    {dossier.lines.map((line, index) => (
+                      <p key={`${index}-${line.slice(0, 24)}`} className={profileLineClass(line)}>{line}</p>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="muted">{profileNote && !dossier ? "" : "This resume has no readable text. Download the file to open it."}</p>
+                )}
+              </div>
+            ) : (
+            <>
+            <h3>Qualification</h3>
+            {profileLoading ? (
+              <p className="muted">Reading the resume…</p>
+            ) : dossier && dossier.qualification.length > 0 ? (
+              <ul>{dossier.qualification.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}</ul>
+            ) : (
+              <p className="muted">{profileNote && !dossier ? "" : "No qualification was found in this resume."}</p>
+            )}
+            <h3>Project skills</h3>
+            {profileLoading ? null : dossier && dossier.projects.length > 0 ? (
+              dossier.projects.map((project, index) => (
+                <div className="project" key={`${index}-${project.title}`}>
+                  <p>{project.title}</p>
+                  {project.skills.length > 0 ? (
+                    <div className="chips">{project.skills.map((skill) => <span className="chip" key={skill}>{skillLabel(skill)}</span>)}</div>
+                  ) : (
+                    <p className="muted">No tools were listed for this project.</p>
+                  )}
+                </div>
+              ))
+            ) : (
+              <p className="muted">{profileNote && !dossier ? "" : "No projects were found in this resume."}</p>
+            )}
+            </>
+            )}
+            {profileNote && <p className={profileNote.startsWith("Saved") ? undefined : "error"}>{profileNote}</p>}
+            <div className="row">
+              <button type="button" onClick={() => downloadProfile(profile).catch((error: Error) => setProfileNote(plain(error)))}>Download resume</button>
+            </div>
+            <p className="muted">This saves the original resume file on this computer. Nothing is uploaded.</p>
+          </section>
+        </div>
+      )}
     </main>
   );
+}
+
+function profileLineClass(line: string) {
+  const words = line.split(/\s+/).length;
+  if (line.endsWith(":") || (words <= 4 && !line.endsWith("."))) return "resume-heading";
+  return "";
+}
+
+function skillLabel(skill: string) {
+  const known: Record<string, string> = {
+    sql: "SQL", idmc: "IDMC", aws: "AWS", rest: "REST", html: "HTML", css: "CSS", j2ee: "J2EE", jsf: "JSF",
+    mysql: "MySQL", postgresql: "PostgreSQL", mongodb: "MongoDB", javascript: "JavaScript", typescript: "TypeScript",
+    powercenter: "PowerCenter", iics: "IICS", plsql: "PL/SQL", etl: "ETL", ssis: "SSIS",
+  };
+  return known[skill] ?? skill.replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function experienceLabel(years: number | null) {

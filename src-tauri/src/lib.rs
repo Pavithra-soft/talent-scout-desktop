@@ -1,4 +1,5 @@
 mod db;
+mod dossier;
 mod excel;
 mod extract;
 mod fields;
@@ -53,6 +54,7 @@ struct GridRow {
     score: Option<i32>,
     rationale: String,
     note: String,
+    path: String,
 }
 
 #[derive(Serialize)]
@@ -259,6 +261,47 @@ fn save_drafts(app: AppHandle, state: State<Scout>, subject: String, instruction
 }
 
 #[tauri::command]
+fn open_profile(state: State<Scout>, path: String) -> Result<dossier::Dossier, String> {
+    let connection = state.db.lock().unwrap();
+    known_resume(&connection, &path)?;
+    let text = crate::extract::resume_text(std::path::Path::new(&path))?;
+    Ok(dossier::from_text(&text))
+}
+
+#[tauri::command]
+fn save_resume_copy(state: State<Scout>, source: String, dest: String) -> Result<(), String> {
+    let connection = state.db.lock().unwrap();
+    known_resume(&connection, &source)?;
+    let from = std::path::Path::new(&source);
+    let to = std::path::Path::new(&dest);
+    if dest.trim().is_empty() || to.is_dir() {
+        return Err("Choose a file name for the resume.".to_string());
+    }
+    if to.exists() {
+        let same = std::fs::canonicalize(from).ok() == std::fs::canonicalize(to).ok();
+        if same {
+            return Err("Choose a different file name. The original resume stays in its folder.".to_string());
+        }
+    }
+    if let Some(parent) = to.parent() {
+        fs::create_dir_all(parent).map_err(|_| "That folder could not be created.".to_string())?;
+    }
+    fs::copy(from, to).map_err(|_| "The resume could not be saved. Choose another folder and try again.".to_string())?;
+    Ok(())
+}
+
+fn known_resume(connection: &Connection, path: &str) -> Result<(), String> {
+    let found: i64 = connection
+        .query_row("SELECT COUNT(*) FROM profiles WHERE path = ?1", [path], |row| row.get(0))
+        .map_err(|err| err.to_string())?;
+    if found == 0 {
+        Err("That resume is not in the current search.".to_string())
+    } else {
+        Ok(())
+    }
+}
+
+#[tauri::command]
 fn portal_query(jd_text: String) -> Result<query::PortalQuery, String> {
     query::portal_query(&jd_text)
 }
@@ -454,6 +497,7 @@ fn grid_from(conn: &Connection, filters: &Filters) -> Result<Grid, String> {
             score: row.score,
             rationale: row.rationale,
             note: row.note,
+            path: row.path,
         })
         .collect();
     Ok(Grid {
@@ -510,7 +554,9 @@ pub fn run() {
             save_drafts,
             portal_search,
             portal_download,
-            portal_query
+            portal_query,
+            open_profile,
+            save_resume_copy
         ])
         .run(tauri::generate_context!())
         .expect("error while running Talent Scout Desktop");

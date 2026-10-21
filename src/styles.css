@@ -72,3 +72,73 @@ th, td { text-align: left; padding: 0.4rem; border-bottom: 1px solid #eee; verti
 .error { color: #8a2b2b; }
 
 .weights { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.5rem; }
+
+button.link {
+  background: none;
+  color: #1f4b3a;
+  padding: 0;
+  text-decoration: underline;
+  text-align: left;
+}
+
+.name-cell { display: flex; flex-direction: column; align-items: flex-start; gap: 0.25rem; }
+
+button.text-action {
+  background: #e7f0ea;
+  color: #1f4b3a;
+  border: 1px solid #c5ddd0;
+  padding: 0.12rem 0.5rem;
+  border-radius: 99px;
+  font-size: 0.78rem;
+}
+
+.view-switch { display: flex; gap: 0.4rem; margin: 0.75rem 0; }
+
+.view-switch button { background: #e7e1d6; color: #1c2430; }
+
+.view-switch button.on { background: #1f4b3a; color: white; }
+
+.resume-view {
+  background: #faf8f4;
+  border-radius: 10px;
+  padding: 0.2rem 0.9rem 0.6rem;
+}
+
+.resume-view p { margin: 0.35rem 0; }
+
+.resume-heading { font-weight: 650; margin-top: 0.8rem; }
+
+.sheet-back {
+  position: fixed;
+  inset: 0;
+  background: rgba(28, 36, 48, 0.45);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 2rem 1rem;
+  z-index: 20;
+}
+
+.sheet {
+  width: min(720px, 100%);
+  max-height: calc(100vh - 4rem);
+  overflow: auto;
+  margin: 0;
+  box-shadow: 0 18px 50px rgba(28, 36, 48, 0.28);
+}
+
+.sheet-head { display: flex; justify-content: space-between; gap: 1rem; align-items: flex-start; }
+
+.sheet h2 { margin: 0; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+
+.chip {
+  background: #e7f0ea;
+  color: #1f4b3a;
+  border-radius: 99px;
+  padding: 0.15rem 0.55rem;
+  font-size: 0.85rem;
+}
+
+.project { border-top: 1px solid #eee; padding-top: 0.6rem; }

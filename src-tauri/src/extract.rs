@@ -151,6 +151,12 @@ fn doc_text(bytes: &[u8]) -> String {
     words.join("\n")
 }
 
+pub fn resume_text(path: &Path) -> Result<String, String> {
+    let bytes = fs::read(path).map_err(|_| "The resume file could not be opened. It may have been moved.".to_string())?;
+    let name = path.file_name().and_then(|item| item.to_str()).unwrap_or("resume");
+    text_from_bytes(name, &bytes)
+}
+
 pub fn allowed_name(name: &str) -> bool {
     let lower = name.to_lowercase();
     [".pdf", ".docx", ".doc", ".rtf", ".txt", ".png", ".jpg", ".jpeg", ".zip"]
