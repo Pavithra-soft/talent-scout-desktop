@@ -33,6 +33,8 @@ jobs:
 
             Click a name to see qualification and the skills used on each project. View profile opens the resume. Download resume saves a copy of the original file on this computer.
 
+            See ranked candidates sends the skill names in the job to Gemini once. Related names are added to primary or secondary, shown above the list, and used for the search. Resumes stay on this computer. Save a Gemini key in step 2 first. The same job reuses that reply until the job text changes.
+
             Choose resume files reads only the files you tick. Choose resume folder still reads the whole folder. The Experience column shows each person's years. Portal search query turns a job into keywords you can paste into a job site. The app does not sign in to a job site.
 
             Email drafts are prepared in Mail or Outlook from the job, the candidate, and any extra instructions. They are not sent.

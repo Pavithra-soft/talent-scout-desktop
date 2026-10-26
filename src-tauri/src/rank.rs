@@ -24,7 +24,9 @@ impl Default for Weights {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JobNeeds {
     pub must_have: Vec<String>,
+    pub must_aliases: Vec<Vec<String>>,
     pub nice_to_have: Vec<String>,
+    pub nice_aliases: Vec<Vec<String>>,
     pub min_years: Option<i32>,
     pub max_years: Option<i32>,
     pub locations: Vec<String>,
@@ -42,12 +44,14 @@ pub fn parse_job(text: &str) -> JobNeeds {
     let lower = text.to_lowercase();
     let (must_text, nice_text) = split_sections(&lower, text);
     let must_have = if must_text.is_empty() && nice_text.is_empty() {
-        find_skills(text)
+        skill_terms(text)
     } else {
-        find_skills(&must_text)
+        skill_terms(&must_text)
     };
-    let mut nice_to_have = find_skills(&nice_text);
+    let mut nice_to_have = skill_terms(&nice_text);
     nice_to_have.retain(|skill| !must_have.contains(skill));
+    let must_aliases = must_have.iter().map(|skill| vec![skill.clone()]).collect();
+    let nice_aliases = nice_to_have.iter().map(|skill| vec![skill.clone()]).collect();
     let (min_years, max_years) = experience_range(text);
     let locations = crate::fields::find_location(text);
     let locations = if locations.is_empty() {
@@ -57,7 +61,9 @@ pub fn parse_job(text: &str) -> JobNeeds {
     };
     JobNeeds {
         must_have,
+        must_aliases,
         nice_to_have,
+        nice_aliases,
         min_years,
         max_years,
         locations,
@@ -72,21 +78,14 @@ pub fn score_profile(
     weights: &Weights,
 ) -> Score {
     let profile_skills = find_skills(skills);
-    let matched_must: Vec<String> = job
-        .must_have
-        .iter()
-        .filter(|skill| profile_skills.iter().any(|item| item == *skill))
-        .cloned()
-        .collect();
-    let matched_nice: Vec<String> = job
-        .nice_to_have
-        .iter()
-        .filter(|skill| profile_skills.iter().any(|item| item == *skill))
-        .cloned()
-        .collect();
+    let has = |skill: &str| profile_skills.iter().any(|item| item == skill) || term_in(skills, skill);
+    let matched_must = matched_groups(&job.must_have, &job.must_aliases, &has);
+    let matched_nice = matched_groups(&job.nice_to_have, &job.nice_aliases, &has);
     let mut missing = Vec::new();
     for skill in job.must_have.iter().chain(job.nice_to_have.iter()) {
-        if !matched_must.contains(skill) && !matched_nice.contains(skill) {
+        if !matched_must.iter().any(|item| item == skill || item.starts_with(&format!("{skill} (")))
+            && !matched_nice.iter().any(|item| item == skill || item.starts_with(&format!("{skill} (")))
+        {
             missing.push(skill.clone());
         }
     }
@@ -103,6 +102,8 @@ pub fn score_profile(
     }
     let must_ratio = if job.must_have.is_empty() { 0.0 } else { ratio(matched_must.len(), job.must_have.len()) };
     let nice_ratio = if job.nice_to_have.is_empty() { 0.0 } else { ratio(matched_nice.len(), job.nice_to_have.len()) };
+    // Secondary skills raise the score after primary skills match. A full secondary list cannot outrank a primary match.
+    let nice_credit = if job.must_have.is_empty() { nice_ratio } else { nice_ratio * (0.2 + 0.8 * must_ratio) };
     let experience_ratio = experience_fit(years, job.min_years, job.max_years);
     let location_ratio = location_fit(location, &job.locations);
     let weight_must = if job.must_have.is_empty() { 0 } else { weights.must };
@@ -111,7 +112,7 @@ pub fn score_profile(
     let weight_location = if listed_location { weights.location } else { 0 };
     let total = (weight_must + weight_nice + weight_experience + weight_location).max(1) as f32;
     let points = weight_must as f32 * must_ratio
-        + weight_nice as f32 * nice_ratio
+        + weight_nice as f32 * nice_credit
         + weight_experience as f32 * experience_ratio
         + weight_location as f32 * location_ratio;
     let score = ((100.0 * points / total).round() as i32).clamp(0, 100);
@@ -131,9 +132,14 @@ pub fn score_profile(
         format!("This job did not list skills, so skills were not scored. {experience_note} {location_note}")
     } else {
         format!(
-            "Matches {} of {} required skills. {experience_note} {location_note}",
+            "Matches {} of {} primary skills{}. {experience_note} {location_note}",
             matched_must.len(),
-            job.must_have.len()
+            job.must_have.len(),
+            if job.nice_to_have.is_empty() {
+                String::new()
+            } else {
+                format!(" and {} of {} secondary skills", matched_nice.len(), job.nice_to_have.len())
+            }
         )
     };
     Score {
@@ -142,6 +148,18 @@ pub fn score_profile(
         missing,
         rationale,
     }
+}
+
+fn matched_groups(names: &[String], aliases: &[Vec<String>], has: &dyn Fn(&str) -> bool) -> Vec<String> {
+    names
+        .iter()
+        .enumerate()
+        .filter_map(|(index, name)| {
+            let group = aliases.get(index).map(|items| items.as_slice()).unwrap_or(&[]);
+            let hit = group.iter().find(|term| has(term)).or(if has(name) { Some(name) } else { None });
+            hit.map(|term| if term == name { name.clone() } else { format!("{name} ({term})") })
+        })
+        .collect()
 }
 
 fn ratio(matched: usize, total: usize) -> f32 {
@@ -207,9 +225,134 @@ fn section_at(lower: &str, labels: &[&str]) -> Option<usize> {
     labels.iter().filter_map(|label| lower.find(label)).min()
 }
 
+fn skill_terms(section: &str) -> Vec<String> {
+    let mut terms = find_skills(section);
+    let lowered = section.to_lowercase();
+    let listed = lowered.contains(',') || lowered.contains(';') || lowered.contains('\n') || lowered.contains('•');
+    for part in lowered.split(|ch: char| matches!(ch, ',' | ';' | '|' | '\n' | '/' | '•' | '·')) {
+        for piece in part.split(" and ") {
+            let term = clean_term(piece);
+            if term.is_empty() || terms.iter().any(|have| have == &term) || is_noise(&term) || !find_skills(&term).is_empty() {
+                continue;
+            }
+            let words = term.split_whitespace().count();
+            let single_tool = words == 1 && term.len() <= 24 && term.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '+' || ch == '#');
+            if single_tool || (listed && words <= 3) {
+                terms.push(term);
+            }
+        }
+    }
+    terms
+}
+
+fn clean_term(raw: &str) -> String {
+    let mut text = raw.trim().to_string();
+    for prefix in [
+        "primary skills:",
+        "primary skill:",
+        "secondary skills:",
+        "secondary skill:",
+        "primary skills",
+        "primary skill",
+        "secondary skills",
+        "secondary skill",
+        "must-have:",
+        "must-have",
+        "must have:",
+        "must have",
+        "nice-to-have:",
+        "nice-to-have",
+        "nice to have:",
+        "nice to have",
+        "required skills:",
+        "required skills",
+        "preferred skills:",
+        "preferred skills",
+        "core skills:",
+        "core skills",
+        "key skills:",
+        "key skills",
+        "good to have:",
+        "good to have",
+        "optional skills:",
+        "optional skills",
+        "additional skills:",
+        "additional skills",
+        "essential skills:",
+        "essential skills",
+        "mandatory skills:",
+        "mandatory skills",
+        "preferably",
+        "preferred:",
+        "preferred",
+        "primary:",
+        "secondary:",
+    ] {
+        if let Some(rest) = text.strip_prefix(prefix) {
+            text = rest.trim().to_string();
+        }
+    }
+    text.trim_matches(|ch: char| !ch.is_alphanumeric() && ch != '+' && ch != '#' && ch != '.')
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn is_noise(term: &str) -> bool {
+    let words: Vec<&str> = term.split_whitespace().collect();
+    if words.is_empty() || words.len() > 4 || term.len() < 2 || term.len() > 40 {
+        return true;
+    }
+    if term.chars().any(|ch| ch.is_ascii_digit()) {
+        return true;
+    }
+    const NOISE: &[&str] = &[
+        "skill", "skills", "experience", "location", "years", "year", "required", "preferred", "primary", "secondary",
+        "knowledge", "strong", "good", "hands", "with", "and", "the", "role", "candidate", "must", "have", "nice",
+        "core", "key", "optional", "additional", "essential", "mandatory",
+    ];
+    words.iter().all(|word| NOISE.contains(word))
+}
+
+fn term_in(text: &str, skill: &str) -> bool {
+    let folded = text
+        .to_lowercase()
+        .replace(|ch: char| matches!(ch, '/' | ',' | ';' | '|' | '\n' | '\r' | '.' | '(' | ')' | ':' | '[' | ']' | '•' | '-' | '–' | '—'), " ");
+    let collapsed = folded.split_whitespace().collect::<Vec<_>>().join(" ");
+    format!(" {collapsed} ").contains(&format!(" {} ", skill.to_lowercase()))
+}
+
 fn split_sections(lower: &str, original: &str) -> (String, String) {
-    let must_at = section_at(lower, &["must-have", "must have", "required"]);
-    let nice_at = section_at(lower, &["nice-to-have", "nice to have", "preferably", "preferred", "good to have"]);
+    let must_at = section_at(
+        lower,
+        &[
+            "primary skills",
+            "primary skill",
+            "primary:",
+            "core skills",
+            "key skills",
+            "must-have",
+            "must have",
+            "required skills",
+            "mandatory skills",
+            "essential skills",
+        ],
+    );
+    let nice_at = section_at(
+        lower,
+        &[
+            "secondary skills",
+            "secondary skill",
+            "secondary:",
+            "nice-to-have",
+            "nice to have",
+            "preferably",
+            "preferred",
+            "good to have",
+            "optional skills",
+            "additional skills",
+        ],
+    );
     match (must_at, nice_at) {
         (Some(must), Some(nice)) if nice > must => (
             original[must..nice].to_string(),
@@ -311,5 +454,34 @@ mod tests {
         assert!(full.rationale.contains("A city was not requested."));
         let plus = parse_job("Overall 8+ years of Java");
         assert_eq!(plus.min_years, Some(8));
+    }
+
+    #[test]
+    fn primary_skills_outrank_a_secondary_only_profile() {
+        let job = parse_job("ETL developer\nPrimary skills: Informatica, IDMC, PowerCenter\nSecondary skills: SQL, Python, AWS\n");
+        assert!(job.must_have.contains(&"informatica".to_string()));
+        assert!(job.must_have.contains(&"idmc".to_string()));
+        assert!(job.nice_to_have.contains(&"sql".to_string()));
+        assert!(job.nice_to_have.contains(&"python".to_string()));
+        assert!(!job.must_have.contains(&"sql".to_string()));
+        let primary = score_profile("Informatica, IDMC, PowerCenter", Some(7), "Hyderabad", &job, &Weights::default());
+        let secondary = score_profile("SQL, Python, AWS", Some(9), "Hyderabad", &job, &Weights::default());
+        assert!(primary.score > secondary.score);
+        assert!(primary.score >= 70);
+        assert!(secondary.score < 40);
+        assert!(primary.rationale.contains("3 of 3 primary"));
+        assert!(primary.rationale.contains("0 of 3 secondary"));
+    }
+
+    #[test]
+    fn a_listed_skill_outside_the_dictionary_still_counts() {
+        let job = parse_job("Primary skills: Snowflake, dbt\nSecondary skills: Airflow\n");
+        assert!(job.must_have.iter().any(|skill| skill == "snowflake"));
+        assert!(job.must_have.iter().any(|skill| skill == "dbt"));
+        assert!(job.nice_to_have.iter().any(|skill| skill == "airflow"));
+        let fit = score_profile("Built Snowflake models with dbt for the warehouse team.", Some(6), "", &job, &Weights::default());
+        let other = score_profile("Java and Spring Boot developer", Some(8), "", &job, &Weights::default());
+        assert!(fit.matching.iter().any(|skill| skill == "snowflake"));
+        assert!(fit.score > other.score);
     }
 }

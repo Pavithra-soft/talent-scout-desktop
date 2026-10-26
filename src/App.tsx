@@ -55,6 +55,11 @@ type Grid = {
   stored: number;
   jd: string;
   offline: boolean;
+  primary_search: string[];
+  secondary_search: string[];
+  added_primary: string[];
+  added_secondary: string[];
+  skill_note: string;
 };
 
 type Filters = {
@@ -112,6 +117,8 @@ export default function App() {
   const [profileNote, setProfileNote] = useState("");
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileView, setProfileView] = useState<ProfileView>("highlights");
+  const [geminiKey, setGeminiKey] = useState("");
+  const [geminiSaved, setGeminiSaved] = useState(false);
   const openedPath = useRef("");
   const dossierRef = useRef<Dossier | null>(null);
   const [portalPeople, setPortalPeople] = useState<PortalPerson[]>([]);
@@ -214,6 +221,7 @@ export default function App() {
     }).catch(() => undefined);
     refresh().catch(() => undefined);
     refreshMail().catch(() => undefined);
+    invoke<boolean>("gemini_status").then(setGeminiSaved).catch(() => undefined);
     const dropped = Promise.resolve()
       .then(() => getCurrentWebview().onDragDropEvent((event) => {
         if (event.payload.type === "drop" && event.payload.paths[0]) {
@@ -361,6 +369,17 @@ export default function App() {
       setProfileNote("Saved the resume file. It is the original document.");
     } catch (error) {
       setProfileNote(plain(error));
+    }
+  }
+
+  async function saveGemini() {
+    try {
+      await invoke("save_gemini_key", { key: geminiKey });
+      setGeminiSaved(geminiKey.trim().length > 0);
+      setGeminiKey("");
+      setMessage(geminiKey.trim() ? "Gemini key saved on this computer." : "Gemini key removed from this computer.");
+    } catch (error) {
+      setMessage(plain(error));
     }
   }
 
@@ -611,8 +630,24 @@ export default function App() {
             <label>City <input type="number" value={weights.location} onChange={(event) => setWeights({ ...weights, location: Number(event.target.value) })} /></label>
           </div>
         </details>
-        <button type="button" onClick={rank}>See ranked candidates</button>
-        <p className="muted">The list starts at a match score of 50. Clear Minimum match score and click Apply filters to see lower scores. Hover a match score to read why.</p>
+        <label>Gemini key
+          <input type="password" value={geminiKey} placeholder={geminiSaved ? "A key is saved on this computer" : "Paste a Gemini key to add related skills"} onChange={(event) => setGeminiKey(event.target.value)} />
+        </label>
+        <div className="row">
+          <button type="button" className="secondary" onClick={() => saveGemini()}>Save Gemini key</button>
+          <button type="button" onClick={rank}>See ranked candidates</button>
+        </div>
+        {(grid?.primary_search?.length || grid?.secondary_search?.length) ? (
+          <div>
+            <p><strong>Primary search skills. </strong>{showSkills(grid?.primary_search ?? [])}</p>
+            <p><strong>Secondary search skills. </strong>{showSkills(grid?.secondary_search ?? []) || "None"}</p>
+            {(grid?.added_primary?.length || grid?.added_secondary?.length) ? (
+              <p className="muted">Added for this search: {showSkills([...(grid?.added_primary ?? []), ...(grid?.added_secondary ?? [])])}</p>
+            ) : null}
+          </div>
+        ) : null}
+        {grid?.skill_note && <p className="muted">{grid.skill_note}</p>}
+        <p className="muted">One Gemini call reads the skill names in the job and adds related skills to primary or secondary. Resumes stay on this computer. Primary skills decide the order. The list starts at a match score of 50. Hover a match score to read why.</p>
       </section>
 
       <section ref={resultsRef}>
@@ -810,6 +845,10 @@ function profileLineClass(line: string) {
   const words = line.split(/\s+/).length;
   if (line.endsWith(":") || (words <= 4 && !line.endsWith("."))) return "resume-heading";
   return "";
+}
+
+function showSkills(skills: string[]) {
+  return skills.map(skillLabel).join(", ");
 }
 
 function skillLabel(skill: string) {

@@ -4,6 +4,19 @@ use std::path::Path;
 
 use crate::fields::{profile_from_text, Profile};
 
+pub fn profile_and_text(path: &Path) -> Result<(Profile, String), String> {
+    let bytes = fs::read(path).map_err(|_| "The resume file could not be opened. It may have been moved.".to_string())?;
+    let name = path.file_name().and_then(|item| item.to_str()).unwrap_or("resume");
+    if bytes.len() > 15 * 1024 * 1024 {
+        return Err("This file is too large to read. Split it or send a smaller copy.".to_string());
+    }
+    let text = text_from_bytes(name, &bytes)?;
+    if text.trim().is_empty() {
+        return Err("This file is empty. Remove it or add a resume with text.".to_string());
+    }
+    Ok((profile_from_text(&text), text))
+}
+
 pub fn profile_from_path(path: &Path) -> Result<Profile, String> {
     let bytes = fs::read(path).map_err(|err| err.to_string())?;
     let name = path

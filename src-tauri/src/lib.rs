@@ -1,4 +1,5 @@
 mod db;
+mod expand;
 mod dossier;
 mod excel;
 mod extract;
@@ -66,6 +67,11 @@ struct Grid {
     stored: i32,
     jd: String,
     offline: bool,
+    primary_search: Vec<String>,
+    secondary_search: Vec<String>,
+    added_primary: Vec<String>,
+    added_secondary: Vec<String>,
+    skill_note: String,
 }
 
 #[derive(Serialize)]
@@ -302,6 +308,16 @@ fn known_resume(connection: &Connection, path: &str) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn gemini_status() -> bool {
+    !expand::gemini_key().is_empty()
+}
+
+#[tauri::command]
+fn save_gemini_key(key: String) -> Result<(), String> {
+    expand::save_gemini_key(&key)
+}
+
+#[tauri::command]
 fn portal_query(jd_text: String) -> Result<query::PortalQuery, String> {
     query::portal_query(&jd_text)
 }
@@ -354,8 +370,21 @@ fn rank_profiles(state: State<Scout>, jd_text: String, weights: Weights, filters
     if trimmed.is_empty() {
         return Err("Paste the job first, then rank the candidates.".to_string());
     }
-    let job = rank::parse_job(trimmed);
+    let mut job = rank::parse_job(trimmed);
+    let cached = {
+        let connection = state.db.lock().unwrap();
+        if db::get_setting(&connection, "root").is_empty() {
+            return Err("Choose a resume folder first.".to_string());
+        }
+        (db::get_setting(&connection, "expand_jd"), db::get_setting(&connection, "expand_json"))
+    };
+    let fetched = if cached.0 == trimmed && !cached.1.is_empty() {
+        Ok(cached.1)
+    } else {
+        expand::fetch_related(&job.must_have, &job.nice_to_have)
+    };
     let connection = state.db.lock().unwrap();
+    let plan = related_skills(&connection, trimmed, &mut job, fetched);
     let root = db::get_setting(&connection, "root");
     if root.is_empty() {
         return Err("Choose a resume folder first.".to_string());
@@ -365,11 +394,12 @@ fn rank_profiles(state: State<Scout>, jd_text: String, weights: Weights, filters
         if !profile.error.is_empty() {
             continue;
         }
-        let (skills, years, location) = skills_for_this_job(&profile);
+        let (skills, years, location, text) = skills_for_this_job(&profile);
         if skills != profile.skills {
             let _ = db::replace_skills(&connection, &profile.path, &skills);
         }
-        let scored = rank::score_profile(&skills, years, &location, &job, &weights);
+        let haystack = if text.is_empty() { skills.clone() } else { format!("{skills}\n{text}") };
+        let scored = rank::score_profile(&haystack, years, &location, &job, &weights);
         db::save_score(
             &connection,
             &profile.path,
@@ -380,22 +410,69 @@ fn rank_profiles(state: State<Scout>, jd_text: String, weights: Weights, filters
         )?;
     }
     let _ = db::audit(&connection, "ranked", "current search");
-    grid_from(&connection, &filters)
+    let mut grid = grid_from(&connection, &filters)?;
+    grid.primary_search = plan.primary;
+    grid.secondary_search = plan.secondary;
+    grid.added_primary = plan.added_primary;
+    grid.added_secondary = plan.added_secondary;
+    grid.skill_note = plan.note;
+    Ok(grid)
 }
 
-#[tauri::command]
-fn skills_for_this_job(profile: &db::Stored) -> (String, Option<i32>, String) {
-    let path = std::path::Path::new(&profile.path);
-    if path.is_file() {
-        if let Ok(fresh) = crate::extract::profile_from_path(path) {
-            if !fresh.skills.is_empty() {
-                let years = fresh.years.or(profile.years);
-                let location = if fresh.location.is_empty() { profile.location.clone() } else { fresh.location };
-                return (fresh.skills, years, location);
+fn related_skills(connection: &Connection, jd: &str, job: &mut rank::JobNeeds, fetched: Result<String, String>) -> expand::SkillPlan {
+    let fresh = match fetched {
+        Ok(body) => {
+            let _ = db::set_setting(connection, "expand_jd", jd);
+            let _ = db::set_setting(connection, "expand_json", &body);
+            body
+        }
+        Err(note) => {
+            let _ = db::set_setting(connection, "expand_jd", "");
+            let _ = db::set_setting(connection, "expand_json", "");
+            let _ = db::set_setting(connection, "skill_note", &note);
+            return expand::SkillPlan {
+                primary: job.must_have.clone(),
+                secondary: job.nice_to_have.clone(),
+                added_primary: Vec::new(),
+                added_secondary: Vec::new(),
+                note,
+            };
+        }
+    };
+    match expand::merge(job, &fresh) {
+        Ok(plan) => {
+            let _ = db::set_setting(connection, "skill_note", &plan.note);
+            let _ = db::set_setting(connection, "primary_search", &plan.primary.join("\n"));
+            let _ = db::set_setting(connection, "secondary_search", &plan.secondary.join("\n"));
+            let _ = db::set_setting(connection, "added_primary", &plan.added_primary.join("\n"));
+            let _ = db::set_setting(connection, "added_secondary", &plan.added_secondary.join("\n"));
+            plan
+        }
+        Err(note) => {
+            let _ = db::set_setting(connection, "skill_note", &note);
+            expand::SkillPlan {
+                primary: job.must_have.clone(),
+                secondary: job.nice_to_have.clone(),
+                added_primary: Vec::new(),
+                added_secondary: Vec::new(),
+                note,
             }
         }
     }
-    (profile.skills.clone(), profile.years, profile.location.clone())
+}
+
+#[tauri::command]
+fn skills_for_this_job(profile: &db::Stored) -> (String, Option<i32>, String, String) {
+    let path = std::path::Path::new(&profile.path);
+    if path.is_file() {
+        if let Ok((fresh, text)) = crate::extract::profile_and_text(path) {
+            let years = fresh.years.or(profile.years);
+            let location = if fresh.location.is_empty() { profile.location.clone() } else { fresh.location };
+            let skills = if fresh.skills.is_empty() { profile.skills.clone() } else { fresh.skills };
+            return (skills, years, location, text);
+        }
+    }
+    (profile.skills.clone(), profile.years, profile.location.clone(), String::new())
 }
 
 #[tauri::command]
@@ -508,7 +585,20 @@ fn grid_from(conn: &Connection, filters: &Filters) -> Result<Grid, String> {
         stored,
         jd: db::get_setting(conn, "jd"),
         offline: true,
+        primary_search: stored_lines(conn, "primary_search"),
+        secondary_search: stored_lines(conn, "secondary_search"),
+        added_primary: stored_lines(conn, "added_primary"),
+        added_secondary: stored_lines(conn, "added_secondary"),
+        skill_note: db::get_setting(conn, "skill_note"),
     })
+}
+
+fn stored_lines(conn: &Connection, key: &str) -> Vec<String> {
+    db::get_setting(conn, key)
+        .lines()
+        .map(|line| line.trim().to_string())
+        .filter(|line| !line.is_empty())
+        .collect()
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -555,6 +645,8 @@ pub fn run() {
             portal_search,
             portal_download,
             portal_query,
+            gemini_status,
+            save_gemini_key,
             open_profile,
             save_resume_copy
         ])

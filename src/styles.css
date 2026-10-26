@@ -42,7 +42,7 @@ section {
 
 label { display: block; margin: 0.45rem 0; }
 
-textarea, input[type="text"], input[type="number"] {
+textarea, input[type="text"], input[type="number"], input[type="password"], input[type="email"] {
   width: 100%;
   padding: 0.5rem;
   border: 1px solid #d5d0c6;

@@ -30,6 +30,10 @@ pub fn field_key() -> Result<[u8; 32], String> {
 
 static KEY_FILE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
 
+pub fn config_dir() -> Option<PathBuf> {
+    KEY_FILE.get().and_then(|path| path.parent().map(|dir| dir.to_path_buf()))
+}
+
 pub fn set_key_dir(dir: &Path) {
     let _ = std::fs::create_dir_all(dir);
     let _ = KEY_FILE.set(dir.join("search.key"));
